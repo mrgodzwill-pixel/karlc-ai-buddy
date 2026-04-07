@@ -157,11 +157,13 @@ KEYWORD_REPLIES = {
 }
 
 # VPN-related keyword replies
+# Only VPN-specific keywords (avoid generic ones like "bayad", "load", "gcash" that overlap with courses)
 _vpn_keywords = [
-    "vpn", "karlcomvpn", "coins", "top up", "topup", "top-up",
-    "load", "remote access", "wireguard", "gcash",
-    "bayad vpn", "vpn subscription", "pag top up", "paano mag top up",
-    "paano magbayad", "coin", "device subscription",
+    "vpn", "karlcomvpn", "wireguard", "remote access",
+    "vpn subscription", "bayad vpn", "vpn coins", "vpn coin",
+    "vpn top up", "vpn topup", "vpn load", "vpn gcash",
+    "pag top up ng vpn", "paano mag top up vpn",
+    "device subscription", "vpn.karlc", "karlc.cloud",
 ]
 for _kw in _vpn_keywords:
     if _kw not in KEYWORD_REPLIES:

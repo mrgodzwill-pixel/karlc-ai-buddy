@@ -229,11 +229,29 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
         "direction": "in",
     })
 
-    # Check if VPN-related message
-    vpn_keywords = ["vpn", "coins", "top up", "topup", "top-up", "load",
-                    "remote access", "wireguard", "gcash", "karlcomvpn",
-                    "subscription", "bayad", "coin", "pag top", "magkano vpn"]
-    is_vpn_inquiry = any(kw in message_text.lower() for kw in vpn_keywords)
+    # Check if VPN-related message (smart detection)
+    msg_lower = message_text.lower()
+
+    # Strong VPN indicators - if any of these are present, it's definitely VPN
+    vpn_strong = ["vpn", "karlcomvpn", "wireguard", "remote access",
+                  "vpn.karlc", "karlc.cloud"]
+    # Weak indicators - only VPN if combined with a strong indicator
+    vpn_weak = ["coins", "coin", "top up", "topup", "top-up",
+                "pag top", "magkano"]
+    # Course/enrollment indicators - if present, it's NOT VPN
+    course_indicators = ["course", "enroll", "access", "portal", "student",
+                         "login", "mikrotik", "ftth", "solar", "ospf",
+                         "quickstart", "dual-isp", "hybrid", "traffic",
+                         "10g", "karlcomboy", "systeme", "xendit",
+                         "hindi makapasok", "wala pa", "nag bayad",
+                         "nagbayad", "nag-bayad", "binayaran"]
+
+    has_strong_vpn = any(kw in msg_lower for kw in vpn_strong)
+    has_weak_vpn = any(kw in msg_lower for kw in vpn_weak)
+    has_course = any(kw in msg_lower for kw in course_indicators)
+
+    # VPN inquiry = has strong VPN keyword, OR has weak keyword without course context
+    is_vpn_inquiry = has_strong_vpn or (has_weak_vpn and not has_course)
 
     # Send Telegram notification for every DM
     if is_vpn_inquiry:
