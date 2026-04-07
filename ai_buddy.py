@@ -234,10 +234,10 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
 
     # Strong VPN indicators - if any of these are present, it's definitely VPN
     vpn_strong = ["vpn", "karlcomvpn", "wireguard", "remote access",
-                  "vpn.karlc", "karlc.cloud"]
-    # Weak indicators - only VPN if combined with a strong indicator
-    vpn_weak = ["coins", "coin", "top up", "topup", "top-up",
-                "pag top", "magkano"]
+                  "vpn.karlc", "karlc.cloud", "coins", "coin",
+                  "top up", "topup", "top-up", "pag top"]
+    # Weak indicators - only VPN if no course context
+    vpn_weak = ["magkano"]
     # Course/enrollment indicators - if present, it's NOT VPN
     course_indicators = ["course", "enroll", "access", "portal", "student",
                          "login", "mikrotik", "ftth", "solar", "ospf",
