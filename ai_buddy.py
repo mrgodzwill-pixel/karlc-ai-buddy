@@ -25,53 +25,36 @@ PHT = timezone(timedelta(hours=8))
 CONVERSATIONS_FILE = os.path.join(DATA_DIR, "dm_conversations.json")
 
 # Gemini API helper with retry + fallback
-def _call_gemini_simple(system_prompt, user_message, max_retries=2):
-    """Call Gemini API with retry logic and fallback models."""
+def _call_gemini_simple(system_prompt, user_message):
+    """Call Gemini API with fast fallback on error."""
     payload = {
         "contents": [{"role": "user", "parts": [{"text": user_message}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
         "generationConfig": {"temperature": 0.7, "maxOutputTokens": 300}
     }
 
-    # Try primary model first, then fallbacks
+    # Try primary model, then fallbacks - no retries, just switch fast
     models_to_try = [GEMINI_MODEL] + [m for m in GEMINI_FALLBACK_MODELS if m != GEMINI_MODEL]
 
     for model in models_to_try:
         url = get_gemini_url(model)
-        for attempt in range(max_retries + 1):
-            try:
-                response = requests.post(url, json=payload, timeout=30)
-                data = response.json()
+        try:
+            response = requests.post(url, json=payload, timeout=15)
+            data = response.json()
 
-                if "candidates" in data and data["candidates"]:
-                    if model != GEMINI_MODEL:
-                        print(f"[AI Buddy] Used fallback model: {model}")
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
+            if "candidates" in data and data["candidates"]:
+                if model != GEMINI_MODEL:
+                    print(f"[AI Buddy] Used fallback model: {model}")
+                return data["candidates"][0]["content"]["parts"][0]["text"]
 
-                # Check for overload / rate limit errors
-                error_msg = ""
-                if "error" in data:
-                    error_msg = data["error"].get("message", "").lower()
-                    status = data["error"].get("code", 0)
-                    if "high demand" in error_msg or "overloaded" in error_msg or "resource" in error_msg or status in [429, 503]:
-                        wait_time = (attempt + 1) * 3
-                        print(f"[AI Buddy] {model} overloaded (attempt {attempt+1}), waiting {wait_time}s...")
-                        time.sleep(wait_time)
-                        continue  # Retry same model
-                    else:
-                        print(f"[AI Buddy] {model} error: {error_msg}")
-                        break  # Try next model
-
-                # No candidates but no error - try next model
-                break
-
-            except requests.exceptions.Timeout:
-                print(f"[AI Buddy] {model} timeout (attempt {attempt+1})")
-                time.sleep(2)
+            # Any error - immediately try next model
+            if "error" in data:
+                print(f"[AI Buddy] {model}: {data['error'].get('message', 'error')[:80]}")
                 continue
-            except Exception as e:
-                print(f"[AI Buddy] {model} error: {e}")
-                break  # Try next model
+
+        except Exception as e:
+            print(f"[AI Buddy] {model} error: {e}")
+            continue
 
     print("[AI Buddy] All Gemini models failed")
     return None
