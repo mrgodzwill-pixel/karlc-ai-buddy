@@ -1,6 +1,6 @@
 """
 AI Buddy - Facebook DM Handler
-Handles student inquiries via Facebook Messenger with GPT intelligence.
+Handles student inquiries via Facebook Messenger with Gemini AI intelligence.
 - Asks for email when student has enrollment issues
 - Checks Gmail for Xendit payment verification
 - Creates tickets and sends urgent Telegram notifications
@@ -12,18 +12,33 @@ import re
 import subprocess
 import requests
 from datetime import datetime, timedelta, timezone
-from openai import OpenAI
+# Using Google Gemini for AI
 
 from config import (
-    PAGE_ACCESS_TOKEN, BASE_URL, OPENAI_API_KEY, OPENAI_MODEL,
-    OPENAI_BASE_URL, DATA_DIR, COURSES, GMAIL_ENABLED
+    PAGE_ACCESS_TOKEN, BASE_URL, GEMINI_API_KEY, GEMINI_MODEL,
+    GEMINI_API_URL, DATA_DIR, COURSES, GMAIL_ENABLED
 )
 
 PHT = timezone(timedelta(hours=8))
 CONVERSATIONS_FILE = os.path.join(DATA_DIR, "dm_conversations.json")
 
-# OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
+# Gemini API helper
+def _call_gemini_simple(system_prompt, user_message):
+    """Call Gemini API for a simple one-shot response."""
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": user_message}]}],
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 300}
+    }
+    try:
+        response = requests.post(GEMINI_API_URL, json=payload, timeout=30)
+        data = response.json()
+        if "candidates" in data and data["candidates"]:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        return None
+    except Exception as e:
+        print(f"[AI Buddy] Gemini error: {e}")
+        return None
 
 # DM conversation states
 STATE_IDLE = "idle"
@@ -134,7 +149,7 @@ def search_xendit_payment(email):
 
 
 def generate_smart_reply(sender_name, message_text, conversation_state):
-    """Generate a smart reply using GPT."""
+    """Generate a smart reply using Gemini AI."""
     system_prompt = """You are Karl C's AI assistant on Facebook Messenger. You help students with enrollment and course access issues.
 
 Rules:
@@ -162,21 +177,10 @@ Student Portal Login:
 4. Click 'Forgot Password' if needed
 """
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"[Sender: {sender_name}] [State: {conversation_state}] {message_text}"}
-    ]
-
     try:
-        response = client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=messages,
-            max_tokens=300,
-            temperature=0.7,
-        )
-        return response.choices[0].message.content
+        return _call_gemini_simple(system_prompt, f"[Sender: {sender_name}] [State: {conversation_state}] {message_text}")
     except Exception as e:
-        print(f"[AI Buddy] GPT error: {e}")
+        print(f"[AI Buddy] Gemini error: {e}")
         return None
 
 
@@ -318,7 +322,7 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
             )
 
     else:
-        # General message - use GPT for smart reply
+        # General message - use Gemini for smart reply
         reply = generate_smart_reply(sender_name, message_text, "general")
         if reply:
             send_fb_message(sender_id, reply)

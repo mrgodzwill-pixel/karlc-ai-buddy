@@ -1,6 +1,6 @@
 """
 Telegram Bot for Karl C AI Buddy
-- GPT-powered natural language chat
+- Gemini-powered natural language chat
 - Command handling
 - Report sending
 - 24/7 listener
@@ -13,19 +13,15 @@ import time
 import requests
 import threading
 from datetime import datetime, timedelta, timezone
-from openai import OpenAI
 
 from config import (
     TELEGRAM_API_URL, TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN,
-    PAGE_NAME, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL,
+    PAGE_NAME, GEMINI_API_KEY, GEMINI_MODEL, GEMINI_API_URL,
     AI_BUDDY_SYSTEM_PROMPT, DATA_DIR, COURSES
 )
 
 PHT = timezone(timedelta(hours=8))
 MAX_MSG_LENGTH = 4096
-
-# OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
 
 # Conversation history for AI chat
 CONVERSATION_FILE = os.path.join(DATA_DIR, "conversation_history.json")
@@ -36,16 +32,69 @@ def _load_conversation():
     if os.path.exists(CONVERSATION_FILE):
         with open(CONVERSATION_FILE) as f:
             data = json.load(f)
-            # Keep only last 20 messages to save tokens
+            # Keep only last 20 messages
             return data[-20:]
     return []
 
 
 def _save_conversation(history):
     """Save conversation history."""
-    # Keep only last 30 messages
     with open(CONVERSATION_FILE, "w") as f:
         json.dump(history[-30:], f, indent=2, ensure_ascii=False)
+
+
+# ============================================================
+# GEMINI API FUNCTION
+# ============================================================
+
+def call_gemini(messages_history, system_prompt, user_message):
+    """Call Google Gemini API for chat completion."""
+    # Build Gemini-format contents
+    contents = []
+
+    # Add conversation history
+    for h in messages_history:
+        role = "user" if h["role"] == "user" else "model"
+        contents.append({
+            "role": role,
+            "parts": [{"text": h["content"]}]
+        })
+
+    # Add current user message
+    contents.append({
+        "role": "user",
+        "parts": [{"text": user_message}]
+    })
+
+    payload = {
+        "contents": contents,
+        "systemInstruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": 1000,
+        }
+    }
+
+    try:
+        response = requests.post(
+            GEMINI_API_URL,
+            json=payload,
+            timeout=30
+        )
+        data = response.json()
+
+        if "candidates" in data and data["candidates"]:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        elif "error" in data:
+            return f"Gemini error: {data['error'].get('message', 'Unknown error')}"
+        else:
+            return "Sorry Boss, hindi ko na-process ang request. Try mo ulit!"
+
+    except Exception as e:
+        print(f"[Gemini] Error: {e}")
+        return f"Sorry Boss, may error ako ngayon: {str(e)[:100]}. Try mo ulit mamaya!"
 
 
 # ============================================================
@@ -284,7 +333,6 @@ def send_keywords_list():
     msg = "🔑 *Auto-Reply Keywords*\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
 
-    # Group similar keywords
     shown = set()
     for keyword, reply in KEYWORD_REPLIES.items():
         preview = reply[:50].replace("\n", " ")
@@ -332,7 +380,7 @@ def resolve_tickets(ticket_ids):
 
 
 # ============================================================
-# AI CHAT (GPT-POWERED)
+# AI CHAT (GEMINI-POWERED)
 # ============================================================
 
 def _get_context_info():
@@ -351,7 +399,6 @@ def _get_context_info():
         for t in pending[:5]:
             context += f"  - Ticket #{t['id']}: {t['type']} | {t['student_name']} | {t['student_email']} | {t.get('course_title', 'N/A')}\n"
 
-    # Check for pending replies
     pending_file = os.path.join(DATA_DIR, "pending_replies.json")
     if os.path.exists(pending_file):
         with open(pending_file) as f:
@@ -367,38 +414,16 @@ def chat_with_ai(user_message):
     history = _load_conversation()
     context = _get_context_info()
 
-    # Build messages for GPT
-    messages = [
-        {"role": "system", "content": AI_BUDDY_SYSTEM_PROMPT + context}
-    ]
+    system_prompt = AI_BUDDY_SYSTEM_PROMPT + context
 
-    # Add conversation history
-    for h in history:
-        messages.append(h)
+    ai_reply = call_gemini(history, system_prompt, user_message)
 
-    # Add current message
-    messages.append({"role": "user", "content": user_message})
+    # Save to conversation history
+    history.append({"role": "user", "content": user_message})
+    history.append({"role": "assistant", "content": ai_reply})
+    _save_conversation(history)
 
-    try:
-        response = client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=messages,
-            max_tokens=1000,
-            temperature=0.7,
-        )
-
-        ai_reply = response.choices[0].message.content
-
-        # Save to conversation history
-        history.append({"role": "user", "content": user_message})
-        history.append({"role": "assistant", "content": ai_reply})
-        _save_conversation(history)
-
-        return ai_reply
-
-    except Exception as e:
-        print(f"[AI] Error: {e}")
-        return f"Sorry Boss, may error ako ngayon: {str(e)[:100]}. Try mo ulit mamaya!"
+    return ai_reply
 
 
 # ============================================================
