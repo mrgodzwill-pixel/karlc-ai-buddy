@@ -1,0 +1,255 @@
+"""
+Data Queries - On-demand data fetching for AI chat.
+Allows Karl to ask about recent FB messages, comments, and emails via natural language.
+"""
+
+import json
+import os
+import requests
+from datetime import datetime, timedelta, timezone
+
+from config import (
+    PAGE_ID, PAGE_ACCESS_TOKEN, BASE_URL, DATA_DIR, GMAIL_ENABLED
+)
+
+PHT = timezone(timedelta(hours=8))
+
+
+# ============================================================
+# FACEBOOK DM QUERIES
+# ============================================================
+
+def get_recent_dms(hours_back=1):
+    """Get recent Facebook DMs from stored messages."""
+    messages_file = os.path.join(DATA_DIR, "messages.json")
+    if not os.path.exists(messages_file):
+        return {"count": 0, "messages": [], "summary": "No stored DMs found."}
+
+    with open(messages_file) as f:
+        all_messages = json.load(f)
+
+    cutoff = datetime.now(PHT) - timedelta(hours=hours_back)
+    recent = []
+
+    for m in all_messages:
+        try:
+            msg_time = datetime.fromisoformat(m.get("timestamp", ""))
+            if msg_time > cutoff:
+                recent.append(m)
+        except:
+            pass
+
+    if not recent:
+        return {
+            "count": 0,
+            "messages": [],
+            "summary": f"No new DMs in the last {hours_back} hour(s)."
+        }
+
+    summary_lines = [f"📬 {len(recent)} DM(s) in the last {hours_back} hour(s):\n"]
+    for m in recent:
+        name = m.get("sender_name", "Unknown")
+        text = m.get("text", "")[:150]
+        time_str = m.get("timestamp", "")[:16]
+        summary_lines.append(f"• {name} ({time_str}): {text}")
+
+    return {
+        "count": len(recent),
+        "messages": recent,
+        "summary": "\n".join(summary_lines)
+    }
+
+
+# ============================================================
+# FACEBOOK COMMENTS QUERIES
+# ============================================================
+
+def get_recent_comments(hours_back=1):
+    """Fetch recent comments from Facebook Page posts."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+
+    try:
+        # Get recent posts
+        url = f"{BASE_URL}/{PAGE_ID}/feed"
+        params = {
+            "access_token": PAGE_ACCESS_TOKEN,
+            "fields": "id,message,created_time",
+            "limit": 10,
+        }
+        response = requests.get(url, params=params, timeout=15)
+        posts = response.json().get("data", [])
+    except Exception as e:
+        return {"count": 0, "comments": [], "summary": f"Error fetching posts: {e}"}
+
+    all_comments = []
+
+    for post in posts:
+        post_id = post.get("id", "")
+        post_msg = post.get("message", "")[:60]
+
+        try:
+            url = f"{BASE_URL}/{post_id}/comments"
+            params = {
+                "access_token": PAGE_ACCESS_TOKEN,
+                "fields": "id,message,from,created_time",
+                "limit": 50,
+                "order": "reverse_chronological",
+            }
+            resp = requests.get(url, params=params, timeout=15)
+            comments = resp.json().get("data", [])
+        except:
+            continue
+
+        for c in comments:
+            try:
+                ct = datetime.fromisoformat(c.get("created_time", "").replace("Z", "+00:00"))
+                if ct < cutoff:
+                    break  # Comments are reverse-chronological, so stop early
+                all_comments.append({
+                    "post_preview": post_msg,
+                    "from": c.get("from", {}).get("name", "Unknown"),
+                    "message": c.get("message", ""),
+                    "time": c.get("created_time", ""),
+                })
+            except:
+                continue
+
+    if not all_comments:
+        return {
+            "count": 0,
+            "comments": [],
+            "summary": f"No new comments in the last {hours_back} hour(s)."
+        }
+
+    summary_lines = [f"💬 {len(all_comments)} comment(s) in the last {hours_back} hour(s):\n"]
+    for c in all_comments[:15]:
+        summary_lines.append(f"• {c['from']} on \"{c['post_preview']}...\": {c['message'][:100]}")
+
+    return {
+        "count": len(all_comments),
+        "comments": all_comments,
+        "summary": "\n".join(summary_lines)
+    }
+
+
+# ============================================================
+# EMAIL QUERIES (via stored reports or Gmail MCP)
+# ============================================================
+
+def get_recent_emails(hours_back=1):
+    """Get recent emails - checks stored enrollment report or runs Gmail search."""
+    # First check if we have a recent enrollment report
+    report_file = os.path.join(DATA_DIR, "enrollment_report.json")
+    if os.path.exists(report_file):
+        with open(report_file) as f:
+            report = json.load(f)
+
+        checked_at = report.get("checked_at", "")
+        payments = report.get("payments", [])
+        enrolments = report.get("enrolments", [])
+        unmatched = report.get("unmatched_students", [])
+
+        summary_lines = [f"📧 Latest Email Report (checked: {checked_at[:16]}):\n"]
+        summary_lines.append(f"• Xendit Payments found: {len(payments)}")
+        summary_lines.append(f"• Systeme.io Enrollments: {len(enrolments)}")
+        summary_lines.append(f"• Matched: {report.get('matched', 0)}")
+        summary_lines.append(f"• Unmatched (needs attention): {report.get('unmatched', 0)}")
+
+        if unmatched:
+            summary_lines.append("\n⚠️ Unmatched students (paid but not enrolled):")
+            for s in unmatched[:5]:
+                summary_lines.append(f"  • {s.get('email', 'N/A')} - {s.get('course', 'N/A')} ({s.get('amount', 'N/A')})")
+
+        if payments:
+            summary_lines.append("\n💰 Recent payments:")
+            for p in payments[:5]:
+                summary_lines.append(f"  • {p.get('email', 'N/A')} - {p.get('course', 'N/A')} ({p.get('amount', 'N/A')})")
+
+        return {
+            "count": len(payments) + len(enrolments),
+            "summary": "\n".join(summary_lines)
+        }
+
+    return {
+        "count": 0,
+        "summary": "No email report available yet. Use /enrollment to run a check, or wait for the next 7AM scheduled report."
+    }
+
+
+# ============================================================
+# MASTER QUERY - Detects what data Karl is asking about
+# ============================================================
+
+def build_data_context(user_message):
+    """Detect what data Karl is asking about and fetch it.
+    Returns context string to inject into AI prompt.
+    """
+    msg_lower = user_message.lower()
+
+    # Detect time frame
+    hours = 1  # default
+    if "today" in msg_lower or "ngayon" in msg_lower:
+        hours = 24
+    elif "24 hour" in msg_lower or "24 hrs" in msg_lower or "24hrs" in msg_lower:
+        hours = 24
+    elif "12 hour" in msg_lower or "12 hrs" in msg_lower or "12hrs" in msg_lower:
+        hours = 12
+    elif "6 hour" in msg_lower or "6 hrs" in msg_lower or "6hrs" in msg_lower:
+        hours = 6
+    elif "3 hour" in msg_lower or "3 hrs" in msg_lower or "3hrs" in msg_lower:
+        hours = 3
+    elif "2 hour" in msg_lower or "2 hrs" in msg_lower or "2hrs" in msg_lower:
+        hours = 2
+    elif "1 hour" in msg_lower or "1 hr" in msg_lower or "1hr" in msg_lower or "isang oras" in msg_lower:
+        hours = 1
+    elif "30 min" in msg_lower or "kalahating oras" in msg_lower:
+        hours = 0.5
+    elif "this week" in msg_lower or "ngayong linggo" in msg_lower:
+        hours = 168
+
+    context_parts = []
+
+    # Detect what data is being asked about
+    asking_messages = any(kw in msg_lower for kw in [
+        "message", "dm", "inbox", "mensahe", "nagmessage",
+        "nag message", "nag-message", "sinend", "nagchat",
+        "nag chat", "may bago", "new message", "latest message",
+        "recent message", "bagong message"
+    ])
+
+    asking_comments = any(kw in msg_lower for kw in [
+        "comment", "komento", "nagcomment", "nag comment",
+        "nag-comment", "new comment", "latest comment",
+        "recent comment", "bagong comment"
+    ])
+
+    asking_emails = any(kw in msg_lower for kw in [
+        "email", "gmail", "payment", "xendit", "bayad",
+        "enrollment", "enroll", "nag bayad", "nagbayad",
+        "nag-bayad", "latest email", "recent email"
+    ])
+
+    # If asking generally ("any updates?", "may bago?", "anong meron?")
+    asking_general = any(kw in msg_lower for kw in [
+        "update", "bago", "meron", "anong nangyari", "what happened",
+        "what's new", "ano na", "kamusta", "status ng page",
+        "latest", "recent", "balita", "report"
+    ])
+
+    # Fetch requested data
+    if asking_messages or asking_general:
+        dm_data = get_recent_dms(hours)
+        context_parts.append(f"\n[FACEBOOK DMs - Last {hours} hour(s)]\n{dm_data['summary']}")
+
+    if asking_comments or asking_general:
+        comment_data = get_recent_comments(hours)
+        context_parts.append(f"\n[FACEBOOK COMMENTS - Last {hours} hour(s)]\n{comment_data['summary']}")
+
+    if asking_emails or asking_general:
+        email_data = get_recent_emails(hours)
+        context_parts.append(f"\n[EMAIL/PAYMENT DATA]\n{email_data['summary']}")
+
+    if context_parts:
+        return "\n".join(context_parts)
+
+    return ""

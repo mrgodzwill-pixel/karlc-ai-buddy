@@ -422,6 +422,12 @@ def chat_with_ai(user_message):
     history = _load_conversation()
     context = _get_context_info()
 
+    # Check if Karl is asking about real data (messages, comments, emails)
+    from data_queries import build_data_context
+    data_context = build_data_context(user_message)
+    if data_context:
+        context += data_context
+
     system_prompt = AI_BUDDY_SYSTEM_PROMPT + context
 
     ai_reply = call_gemini(history, system_prompt, user_message)
