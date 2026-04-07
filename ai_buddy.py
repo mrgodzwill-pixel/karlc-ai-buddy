@@ -81,6 +81,10 @@ def _save_conversations(convos):
 
 def send_fb_message(recipient_id, message_text):
     """Send a message via Facebook Messenger."""
+    if not PAGE_ACCESS_TOKEN:
+        print("[AI Buddy] FB send SKIPPED - PAGE_ACCESS_TOKEN is empty!")
+        return {"error": "No PAGE_ACCESS_TOKEN configured"}
+
     url = f"{BASE_URL}/me/messages"
     payload = {
         "recipient": {"id": recipient_id},
@@ -92,7 +96,14 @@ def send_fb_message(recipient_id, message_text):
         response = requests.post(url, json=payload, timeout=10)
         result = response.json()
         if "error" in result:
-            print(f"[AI Buddy] FB send error: {result['error']}")
+            error_msg = result['error'].get('message', str(result['error']))
+            print(f"[AI Buddy] FB send error: {error_msg}")
+            # Notify Karl on Telegram about the FB API error
+            try:
+                from telegram_bot import send_message as send_tg
+                send_tg(f"\u26a0\ufe0f *FB Reply Failed*\n{error_msg[:200]}")
+            except:
+                pass
         return result
     except Exception as e:
         print(f"[AI Buddy] FB send exception: {e}")
