@@ -4,11 +4,11 @@ A 24/7 AI-powered personal assistant for managing the "Karl C" Facebook Page, co
 
 ## Features
 
-- **Facebook DM Handler**: AI-powered auto-reply for student inquiries
+- **Facebook DM Handler**: Gemini AI-powered auto-reply for student inquiries
 - **Comment Monitoring**: Compiles comments and suggests keyword-based replies
 - **Student Ticket System**: Tracks enrollment issues with pending/done states
 - **Enrollment Checker**: Compares Xendit payments vs Systeme.io enrollments
-- **Telegram Bot**: Full command interface + natural language AI chat
+- **Telegram Bot**: Full command interface + natural language Gemini AI chat
 - **Scheduled Reports**: 7AM & 7PM daily reports via Telegram
 
 ## Architecture
