@@ -229,11 +229,33 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
         "direction": "in",
     })
 
+    # Check if VPN-related message
+    vpn_keywords = ["vpn", "coins", "top up", "topup", "top-up", "load",
+                    "remote access", "wireguard", "gcash", "karlcomvpn",
+                    "subscription", "bayad", "coin", "pag top", "magkano vpn"]
+    is_vpn_inquiry = any(kw in message_text.lower() for kw in vpn_keywords)
+
     # Send Telegram notification for every DM
-    notif = f"💬 *New Facebook DM*\n"
-    notif += f"👤 From: {sender_name}\n"
-    notif += f"📝 Message: {message_text[:200]}\n"
-    notif += f"🕐 {datetime.now(PHT).strftime('%H:%M:%S')} PHT"
+    if is_vpn_inquiry:
+        notif = f"🌐 *VPN INQUIRY - New DM*\n"
+        notif += f"━━━━━━━━━━━━━━━━━━\n"
+        notif += f"👤 From: {sender_name}\n"
+        notif += f"📝 Message: {message_text[:200]}\n"
+        notif += f"🕐 {datetime.now(PHT).strftime('%H:%M:%S')} PHT\n\n"
+        notif += f"💡 *Suggested Reply:*\n"
+        notif += f"Hi {sender_name}! 👋 Para sa VPN coin top-up, pwede ka magbayad via GCash:\n"
+        notif += f"📱 09495446516 (Karl Andrew C.)\n\n"
+        notif += f"Pricing:\n"
+        notif += f"• 50 coins - ₱50 (1 device/1 mo)\n"
+        notif += f"• 150 coins - ₱150\n"
+        notif += f"• 300 coins - ₱300 ⭐\n"
+        notif += f"• 600 coins - ₱600\n\n"
+        notif += f"Send mo lang ang GCash receipt after payment! 😊"
+    else:
+        notif = f"💬 *New Facebook DM*\n"
+        notif += f"👤 From: {sender_name}\n"
+        notif += f"📝 Message: {message_text[:200]}\n"
+        notif += f"🕐 {datetime.now(PHT).strftime('%H:%M:%S')} PHT"
     send_telegram(notif)
 
     # Check if message contains an email
@@ -316,6 +338,30 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
             send_telegram(notif)
 
             convo["state"] = STATE_IDLE
+
+    elif is_vpn_inquiry:
+        # VPN inquiry - auto-reply with GCash payment info
+        vpn_reply = (
+            f"Hi {sender_name}! \U0001f44b\n\n"
+            f"Para sa KarlComVPN coin top-up, pwede ka magbayad via GCash:\n\n"
+            f"\U0001f4f1 GCash: 09495446516\n"
+            f"\U0001f464 Name: Karl Andrew C.\n\n"
+            f"\U0001f4cb Pricing:\n"
+            f"\u2022 50 coins - \u20b150 (1 device/1 month)\n"
+            f"\u2022 150 coins - \u20b1150 (3 device-months)\n"
+            f"\u2022 300 coins - \u20b1300 (6 device-months) \u2b50\n"
+            f"\u2022 600 coins - \u20b1600 (12 device-months)\n"
+            f"\u2022 1200 coins - \u20b11200 (24 device-months)\n\n"
+            f"\U0001f4f8 After payment, send the GCash receipt/screenshot here para ma-top up agad ang coins mo!\n\n"
+            f"\U0001f517 Website: vpn.karlc.cloud\n"
+            f"Salamat po! \U0001f60a"
+        )
+        send_fb_message(sender_id, vpn_reply)
+        convo["messages"].append({
+            "text": vpn_reply,
+            "time": datetime.now(PHT).isoformat(),
+            "direction": "out",
+        })
 
     elif is_enrollment_inquiry(message_text):
         # Student has enrollment/access issue - ask for email

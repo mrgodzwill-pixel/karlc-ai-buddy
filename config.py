@@ -94,6 +94,36 @@ COURSES = {
     },
 }
 
+# === VPN Service Config ===
+VPN_GCASH_NUMBER = "09495446516"
+VPN_GCASH_NAME = "Karl Andrew C."
+VPN_WEBSITE = "vpn.karlc.cloud"
+VPN_SERVICE_NAME = "KarlComVPN"
+VPN_PRICING = {
+    "50_coins": {"coins": 50, "price": 50, "description": "1 device for 1 month"},
+    "150_coins": {"coins": 150, "price": 150, "description": "3 device-months"},
+    "300_coins": {"coins": 300, "price": 300, "description": "6 device-months (Most Popular)"},
+    "600_coins": {"coins": 600, "price": 600, "description": "12 device-months"},
+    "1200_coins": {"coins": 1200, "price": 1200, "description": "24 device-months"},
+}
+
+def _build_vpn_payment_reply():
+    return (
+        "🌐 KarlComVPN - Coin Top Up\n\n"
+        "📋 Pricing:\n"
+        "• 50 coins - ₱50 (1 device/1 month)\n"
+        "• 150 coins - ₱150 (3 device-months)\n"
+        "• 300 coins - ₱300 (6 device-months) ⭐\n"
+        "• 600 coins - ₱600 (12 device-months)\n"
+        "• 1200 coins - ₱1200 (24 device-months)\n\n"
+        "💳 Payment via GCash:\n"
+        f"📱 {VPN_GCASH_NUMBER}\n"
+        f"👤 {VPN_GCASH_NAME}\n\n"
+        "📸 After payment, send the GCash receipt/screenshot here para ma-top up agad ang coins mo!\n\n"
+        f"🔗 Website: {VPN_WEBSITE}\n"
+        "Salamat po! 😊"
+    )
+
 # === Keyword Auto-Reply Config ===
 def _build_price_list():
     lines = ["Ito po ang mga available courses namin:\n"]
@@ -126,6 +156,17 @@ KEYWORD_REPLIES = {
     "hindi makapasok": "Para mag-login sa Student Portal:\n\n1️⃣ Pumunta sa karlcomboy.com\n2️⃣ I-click ang 'Student Login'\n3️⃣ Gamitin ang email mo bilang username\n4️⃣ I-click ang 'Forgot Password' kung nakalimutan mo ang password\n\nKung may problema pa rin, mag-message ka lang! 😊",
 }
 
+# VPN-related keyword replies
+_vpn_keywords = [
+    "vpn", "karlcomvpn", "coins", "top up", "topup", "top-up",
+    "load", "remote access", "wireguard", "gcash",
+    "bayad vpn", "vpn subscription", "pag top up", "paano mag top up",
+    "paano magbayad", "coin", "device subscription",
+]
+for _kw in _vpn_keywords:
+    if _kw not in KEYWORD_REPLIES:
+        KEYWORD_REPLIES[_kw] = _build_vpn_payment_reply()
+
 # Add course-specific keyword replies
 for course_key, course in COURSES.items():
     for kw in course["keywords"]:
@@ -152,9 +193,19 @@ Karl's Business:
 - Students enroll via systeme.io, pay via Xendit
 - Common issue: Students pay but forget to verify email, so they don't receive course access
 
+KarlComVPN Service (vpn.karlc.cloud):
+- WireGuard VPN for remote access to MikroTik routers & devices
+- Coin-based pricing: 50 coins = ₱50 (1 device/1 month), 150 = ₱150, 300 = ₱300, 600 = ₱600, 1200 = ₱1200
+- Yearly plan: 420 coins for 12 months (₱35/mo)
+- 150 free coins on signup
+- Payment is MANUAL via GCash: 09495446516 (Karl Andrew C.)
+- IMPORTANT: When someone asks about VPN payment/top-up/coins, ALWAYS provide the GCash number
+- Monitor VPN-related DMs and comments closely - these are paying subscribers
+
 Your capabilities:
 - Check Facebook page comments and DMs (real-time data is injected when Karl asks)
 - Check recent emails, payments, and enrollment status
+- Monitor VPN subscription inquiries and provide GCash payment details
 - View and manage student tickets
 - Run enrollment comparison (Xendit payments vs systeme.io enrollments)
 - Approve/skip suggested comment replies

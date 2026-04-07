@@ -229,12 +229,24 @@ def build_data_context(user_message):
         "nag-bayad", "latest email", "recent email"
     ])
 
+    asking_vpn = any(kw in msg_lower for kw in [
+        "vpn", "karlcomvpn", "coins", "top up", "topup",
+        "top-up", "wireguard", "remote access", "gcash",
+        "vpn subscriber", "vpn customer", "vpn payment",
+        "vpn message", "vpn dm", "vpn comment"
+    ])
+
     # If asking generally ("any updates?", "may bago?", "anong meron?")
     asking_general = any(kw in msg_lower for kw in [
         "update", "bago", "meron", "anong nangyari", "what happened",
         "what's new", "ano na", "kamusta", "status ng page",
         "latest", "recent", "balita", "report"
     ])
+
+    # If asking about VPN, also fetch DMs and comments (VPN inquiries come through those)
+    if asking_vpn:
+        asking_messages = True
+        asking_comments = True
 
     # Fetch requested data
     if asking_messages or asking_general:
@@ -248,6 +260,15 @@ def build_data_context(user_message):
     if asking_emails or asking_general:
         email_data = get_recent_emails(hours)
         context_parts.append(f"\n[EMAIL/PAYMENT DATA]\n{email_data['summary']}")
+
+    if asking_vpn:
+        context_parts.append(
+            "\n[VPN SERVICE INFO]\n"
+            "KarlComVPN (vpn.karlc.cloud) - WireGuard VPN for MikroTik remote access\n"
+            "Coin Pricing: 50=\u20b150, 150=\u20b1150, 300=\u20b1300, 600=\u20b1600, 1200=\u20b11200\n"
+            "Payment: GCash 09495446516 (Karl Andrew C.)\n"
+            "NOTE: Look for VPN-related keywords in DMs/comments above (vpn, coins, top up, load, gcash, remote access)"
+        )
 
     if context_parts:
         return "\n".join(context_parts)
