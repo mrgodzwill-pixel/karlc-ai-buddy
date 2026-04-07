@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from config import (
     TELEGRAM_API_URL, TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN,
     PAGE_NAME, GEMINI_API_KEY, GEMINI_MODEL, GEMINI_API_URL,
+    GEMINI_FALLBACK_MODELS, get_gemini_url,
     AI_BUDDY_SYSTEM_PROMPT, DATA_DIR, COURSES
 )
 
@@ -47,8 +48,8 @@ def _save_conversation(history):
 # GEMINI API FUNCTION
 # ============================================================
 
-def call_gemini(messages_history, system_prompt, user_message):
-    """Call Google Gemini API for chat completion."""
+def call_gemini(messages_history, system_prompt, user_message, max_retries=2):
+    """Call Google Gemini API with retry logic and fallback models."""
     # Build Gemini-format contents
     contents = []
 
@@ -77,24 +78,47 @@ def call_gemini(messages_history, system_prompt, user_message):
         }
     }
 
-    try:
-        response = requests.post(
-            GEMINI_API_URL,
-            json=payload,
-            timeout=30
-        )
-        data = response.json()
+    # Try primary model first, then fallbacks
+    models_to_try = [GEMINI_MODEL] + [m for m in GEMINI_FALLBACK_MODELS if m != GEMINI_MODEL]
 
-        if "candidates" in data and data["candidates"]:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        elif "error" in data:
-            return f"Gemini error: {data['error'].get('message', 'Unknown error')}"
-        else:
-            return "Sorry Boss, hindi ko na-process ang request. Try mo ulit!"
+    for model in models_to_try:
+        url = get_gemini_url(model)
+        for attempt in range(max_retries + 1):
+            try:
+                response = requests.post(url, json=payload, timeout=30)
+                data = response.json()
 
-    except Exception as e:
-        print(f"[Gemini] Error: {e}")
-        return f"Sorry Boss, may error ako ngayon: {str(e)[:100]}. Try mo ulit mamaya!"
+                if "candidates" in data and data["candidates"]:
+                    if model != GEMINI_MODEL:
+                        print(f"[Gemini] Used fallback model: {model}")
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+
+                # Check for overload / rate limit errors
+                if "error" in data:
+                    error_msg = data["error"].get("message", "").lower()
+                    status = data["error"].get("code", 0)
+                    if "high demand" in error_msg or "overloaded" in error_msg or "resource" in error_msg or status in [429, 503]:
+                        wait_time = (attempt + 1) * 3
+                        print(f"[Gemini] {model} overloaded (attempt {attempt+1}), waiting {wait_time}s...")
+                        time.sleep(wait_time)
+                        continue  # Retry same model
+                    else:
+                        print(f"[Gemini] {model} error: {error_msg}")
+                        break  # Try next model
+
+                # No candidates but no error - try next model
+                break
+
+            except requests.exceptions.Timeout:
+                print(f"[Gemini] {model} timeout (attempt {attempt+1})")
+                time.sleep(2)
+                continue
+            except Exception as e:
+                print(f"[Gemini] {model} error: {e}")
+                break  # Try next model
+
+    print("[Gemini] All models failed")
+    return "Pasensya na Boss, medyo busy ang AI ngayon. Try mo ulit in a few seconds! 🙏"
 
 
 # ============================================================
