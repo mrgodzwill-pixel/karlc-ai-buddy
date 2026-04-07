@@ -141,44 +141,50 @@ def _build_enroll_list():
     lines.append("I-click lang po ang link at sundin ang enrollment steps. Salamat! 😊")
     return "\n".join(lines)
 
-KEYWORD_REPLIES = {
-    "magkano": _build_price_list(),
-    "how much": _build_price_list(),
-    "price": _build_price_list(),
-    "presyo": _build_price_list(),
-    "enroll": _build_enroll_list(),
-    "interested": _build_enroll_list(),
-    "link": _build_enroll_list(),
-    "course": _build_enroll_list(),
-    "login": "Para mag-login sa Student Portal:\n\n1️⃣ Pumunta sa karlcomboy.com\n2️⃣ I-click ang 'Student Login'\n3️⃣ Gamitin ang email mo bilang username\n4️⃣ I-click ang 'Forgot Password' kung nakalimutan mo ang password\n\nKung may problema pa rin, mag-message ka lang! 😊",
-    "password": "Para ma-reset ang password mo:\n\n1️⃣ Pumunta sa karlcomboy.com\n2️⃣ I-click ang 'Student Login'\n3️⃣ I-click ang 'Forgot Password'\n4️⃣ I-enter ang email mo at sundin ang instructions\n\nKung hindi gumana, mag-message ka lang! 😊",
-    "portal": "Para mag-access sa Student Portal:\n\n1️⃣ Pumunta sa karlcomboy.com\n2️⃣ I-click ang 'Student Login'\n3️⃣ Gamitin ang email mo bilang username\n4️⃣ I-click ang 'Forgot Password' kung nakalimutan mo ang password\n\nKung may problema pa rin, mag-message ka lang! 😊",
+# DM Auto-Reply Keywords
+# PRIORITY ORDER: Specific course keywords first, then VPN, then generic/support
+# This ensures "how much solar" matches "solar" (specific) not "how much" (generic)
+
+# --- TIER 1: Course-specific keywords (checked FIRST) ---
+# These are auto-generated from COURSES config below
+
+# --- TIER 2: VPN-specific keywords (checked SECOND) ---
+# These are auto-generated from VPN config below
+
+# --- TIER 3: Generic/support keywords (checked LAST) ---
+_GENERIC_REPLIES = {
     "hindi makapasok": "Para mag-login sa Student Portal:\n\n1️⃣ Pumunta sa karlcomboy.com\n2️⃣ I-click ang 'Student Login'\n3️⃣ Gamitin ang email mo bilang username\n4️⃣ I-click ang 'Forgot Password' kung nakalimutan mo ang password\n\nKung may problema pa rin, mag-message ka lang! 😊",
 }
 
-# VPN-related keyword replies
-# Only VPN-specific keywords (avoid generic ones like "bayad", "load", "gcash" that overlap with courses)
+# Build the final KEYWORD_REPLIES dict with proper priority
+# TIER 1: Course-specific keywords (checked FIRST - highest priority)
+KEYWORD_REPLIES = {}
+for course_key, course in COURSES.items():
+    for kw in course["keywords"]:
+        if kw not in KEYWORD_REPLIES:
+            KEYWORD_REPLIES[kw] = (
+                f"\U0001f4da {course['name']}\n"
+                f"\U0001f4b0 Price: PHP {course['price']:,}\n"
+                f"\U0001f517 Enroll here: {course['url']}\n\n"
+                f"Para mag-enroll, i-click lang po ang link! Salamat! \U0001f60a"
+            )
+
+# TIER 2: VPN-specific keywords
 _vpn_keywords = [
     "vpn", "karlcomvpn", "wireguard", "remote access",
-    "vpn subscription", "bayad vpn", "vpn coins", "vpn coin",
+    "vpn subscription", "vpn coins", "vpn coin",
     "vpn top up", "vpn topup", "vpn load", "vpn gcash",
-    "pag top up ng vpn", "paano mag top up vpn",
     "device subscription", "vpn.karlc", "karlc.cloud",
+    "coins", "coin", "top up", "topup", "top-up", "pag top",
 ]
 for _kw in _vpn_keywords:
     if _kw not in KEYWORD_REPLIES:
         KEYWORD_REPLIES[_kw] = _build_vpn_payment_reply()
 
-# Add course-specific keyword replies
-for course_key, course in COURSES.items():
-    for kw in course["keywords"]:
-        if kw not in KEYWORD_REPLIES:
-            KEYWORD_REPLIES[kw] = (
-                f"📚 {course['name']}\n"
-                f"💰 Price: PHP {course['price']:,}\n"
-                f"🔗 Enroll here: {course['url']}\n\n"
-                f"Para mag-enroll, i-click lang po ang link! Salamat! 😊"
-            )
+# TIER 3: Generic/support keywords (checked LAST)
+for _kw, _reply in _GENERIC_REPLIES.items():
+    if _kw not in KEYWORD_REPLIES:
+        KEYWORD_REPLIES[_kw] = _reply
 
 # === AI Buddy System Prompt ===
 AI_BUDDY_SYSTEM_PROMPT = """You are Karl C's AI Buddy - a friendly, helpful assistant for Karl's Facebook Page "Karl C" which is an educational platform for MikroTik, networking, fiber optics, and solar courses.

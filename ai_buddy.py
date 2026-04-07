@@ -417,8 +417,11 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
 
     else:
         # Check if message matches any keyword for auto-reply
+        # Sort keywords by length (longest first) so "solar" matches before "how much"
+        # and "dual isp" matches before "isp"
         matched_keyword = None
-        for keyword in KEYWORD_REPLIES:
+        sorted_keywords = sorted(KEYWORD_REPLIES.keys(), key=len, reverse=True)
+        for keyword in sorted_keywords:
             if keyword.lower() in msg_lower:
                 matched_keyword = keyword
                 break
