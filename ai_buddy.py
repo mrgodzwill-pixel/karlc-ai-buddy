@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from config import (
     PAGE_ACCESS_TOKEN, BASE_URL, GEMINI_API_KEY, GEMINI_MODEL,
     GEMINI_API_URL, GEMINI_FALLBACK_MODELS, get_gemini_url,
-    DATA_DIR, COURSES, GMAIL_ENABLED
+    DATA_DIR, COURSES, GMAIL_ENABLED, KEYWORD_REPLIES
 )
 
 PHT = timezone(timedelta(hours=8))
@@ -386,9 +386,9 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
         convo["state"] = STATE_WAITING_EMAIL
 
         reply = (
-            f"Hi {sender_name}! 👋\n\n"
+            f"Hi {sender_name}! \U0001f44b\n\n"
             f"Para ma-check ko ang payment at enrollment status mo, "
-            f"pakibigay po ang email address na ginamit mo nung nag-enroll ka. 📧\n\n"
+            f"pakibigay po ang email address na ginamit mo nung nag-enroll ka. \U0001f4e7\n\n"
             f"(Yung email na ni-type mo sa Xendit payment page)"
         )
         send_fb_message(sender_id, reply)
@@ -401,18 +401,41 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
         else:
             send_fb_message(
                 sender_id,
-                f"Pakibigay po ang email address mo para ma-check ko ang payment status mo. 📧"
+                f"Pakibigay po ang email address mo para ma-check ko ang payment status mo. \U0001f4e7"
             )
 
     else:
-        # General message - use Gemini for smart reply
-        reply = generate_smart_reply(sender_name, message_text, "general")
-        if reply:
-            send_fb_message(sender_id, reply)
+        # Check if message matches any keyword for auto-reply
+        matched_keyword = None
+        for keyword in KEYWORD_REPLIES:
+            if keyword.lower() in msg_lower:
+                matched_keyword = keyword
+                break
+
+        if matched_keyword:
+            # Auto-reply with keyword response
+            keyword_reply = KEYWORD_REPLIES[matched_keyword]
+            send_fb_message(sender_id, keyword_reply)
             convo["messages"].append({
-                "text": reply,
+                "text": keyword_reply,
                 "time": datetime.now(PHT).isoformat(),
                 "direction": "out",
             })
+            # Also notify Karl on Telegram
+            auto_notif = f"\U0001f916 *Auto-Replied to DM*\n"
+            auto_notif += f"\U0001f464 To: {sender_name}\n"
+            auto_notif += f"\U0001f50d Keyword: \"{matched_keyword}\"\n"
+            auto_notif += f"\u2705 Sent course/info reply automatically"
+            send_telegram(auto_notif)
+        else:
+            # No keyword match - use Gemini for smart reply
+            reply = generate_smart_reply(sender_name, message_text, "general")
+            if reply:
+                send_fb_message(sender_id, reply)
+                convo["messages"].append({
+                    "text": reply,
+                    "time": datetime.now(PHT).isoformat(),
+                    "direction": "out",
+                })
 
     _save_conversations(convos)
