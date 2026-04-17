@@ -119,23 +119,35 @@ def compare_payments_vs_enrolments(days_back=7):
         print("[Enrollment] GMAIL_USER/GMAIL_APP_PASSWORD not set - skipping enrollment check")
         return _unavailable_report()
 
-    # Search Xendit invoice emails
+    # Search Xendit invoice emails. Broadened from `noreply@xendit.co` to any
+    # xendit.co sender because the actual sender varies (noreply, no-reply,
+    # mailer, etc.). We then filter by subject / payer-email extraction so we
+    # only count real paid invoices.
     xendit_msgs = gmail_imap.search(
-        f"from:noreply@xendit.co INVOICE PAID newer_than:{days_back}d",
-        limit=30,
+        f"from:xendit.co newer_than:{days_back}d",
+        limit=50,
     )
     if xendit_msgs is None:
         # IMAP configured but connect failed; treat as unavailable.
         return _unavailable_report()
 
+    print(f"[Enrollment] Xendit sender search returned {len(xendit_msgs)} messages")
+
     payments = []
     for m in xendit_msgs:
         subject = m.get("subject", "")
-        if "INVOICE PAID" not in subject.upper():
+        subject_upper = subject.upper()
+        # Accept any "paid" invoice subject: "INVOICE PAID", "Invoice Paid",
+        # "Payment received", etc. Require "PAID" as the keyword since Xendit
+        # also sends "invoice created" / "reminder" emails we don't want.
+        if "PAID" not in subject_upper:
             continue
         body = m.get("body", "")
         payer_email = _extract_payer_email(body)
         if not payer_email:
+            # Log once so Karl can see in Railway logs which subjects were
+            # matched but failed body extraction (helps tune regex if needed).
+            print(f"[Enrollment] Skipped Xendit msg (no payer email): {subject[:80]}")
             continue
         payments.append({
             "email": payer_email,
