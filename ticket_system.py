@@ -3,62 +3,58 @@ Ticket System for Karl C AI Buddy
 Tracks student issues (DMs, enrollment problems) with pending/done states.
 """
 
-import json
 import os
 from datetime import datetime, timedelta, timezone
 
 from config import DATA_DIR
+from storage import file_lock, load_json, save_json
 
 PHT = timezone(timedelta(hours=8))
 TICKETS_FILE = os.path.join(DATA_DIR, "tickets.json")
 
 
 def _load_tickets():
-    """Load tickets from file."""
-    if os.path.exists(TICKETS_FILE):
-        with open(TICKETS_FILE) as f:
-            return json.load(f)
-    return []
+    return load_json(TICKETS_FILE, [])
 
 
 def _save_tickets(tickets):
-    """Save tickets to file."""
-    with open(TICKETS_FILE, "w") as f:
-        json.dump(tickets, f, indent=2, ensure_ascii=False)
+    save_json(TICKETS_FILE, tickets)
 
 
-def create_ticket(ticket_type, student_name, student_email, course_title="", price="", 
+def create_ticket(ticket_type, student_name, student_email, course_title="", price="",
                   payment_method="", date_paid="", fb_sender_id="", extra_info=""):
-    """Create a new ticket."""
-    tickets = _load_tickets()
-    
-    # Check for duplicate (same email + type + course within last 24h)
-    for t in tickets:
-        if (t["student_email"] == student_email and 
-            t["type"] == ticket_type and 
-            t["course_title"] == course_title and
-            t["status"] == "pending"):
-            return None  # Duplicate
-    
-    ticket_id = len(tickets) + 1
-    ticket = {
-        "id": ticket_id,
-        "type": ticket_type,  # "dm_verified", "dm_no_payment", "enrollment_incomplete"
-        "student_name": student_name,
-        "student_email": student_email,
-        "course_title": course_title,
-        "price": price,
-        "payment_method": payment_method,
-        "date_paid": date_paid,
-        "fb_sender_id": fb_sender_id,
-        "extra_info": extra_info,
-        "status": "pending",
-        "created_at": datetime.now(PHT).isoformat(),
-        "resolved_at": None,
-    }
-    tickets.append(ticket)
-    _save_tickets(tickets)
-    return ticket
+    """Create a new ticket, skipping if a matching pending ticket already exists."""
+    with file_lock(TICKETS_FILE):
+        tickets = _load_tickets()
+
+        for t in tickets:
+            if (t["student_email"] == student_email and
+                t["type"] == ticket_type and
+                t["course_title"] == course_title and
+                t["status"] == "pending"):
+                return None  # Duplicate
+
+        # Derive next ID from max existing ID (safer than len(tickets)+1)
+        next_id = max((t["id"] for t in tickets), default=0) + 1
+
+        ticket = {
+            "id": next_id,
+            "type": ticket_type,
+            "student_name": student_name,
+            "student_email": student_email,
+            "course_title": course_title,
+            "price": price,
+            "payment_method": payment_method,
+            "date_paid": date_paid,
+            "fb_sender_id": fb_sender_id,
+            "extra_info": extra_info,
+            "status": "pending",
+            "created_at": datetime.now(PHT).isoformat(),
+            "resolved_at": None,
+        }
+        tickets.append(ticket)
+        _save_tickets(tickets)
+        return ticket
 
 
 def create_dm_ticket(student_name, student_email, course_title, price, 
@@ -101,16 +97,17 @@ def create_enrollment_ticket(student_name, student_email, course_title, price,
 
 def resolve_ticket(ticket_id):
     """Mark a ticket as resolved."""
-    tickets = _load_tickets()
-    for t in tickets:
-        if t["id"] == ticket_id:
-            if t["status"] == "done":
-                return t, "already_done"
-            t["status"] = "done"
-            t["resolved_at"] = datetime.now(PHT).isoformat()
-            _save_tickets(tickets)
-            return t, "resolved"
-    return None, "not_found"
+    with file_lock(TICKETS_FILE):
+        tickets = _load_tickets()
+        for t in tickets:
+            if t["id"] == ticket_id:
+                if t["status"] == "done":
+                    return t, "already_done"
+                t["status"] = "done"
+                t["resolved_at"] = datetime.now(PHT).isoformat()
+                _save_tickets(tickets)
+                return t, "resolved"
+        return None, "not_found"
 
 
 def get_pending_tickets(ticket_type=None):

@@ -16,10 +16,11 @@ from datetime import datetime, timedelta, timezone
 # Using Google Gemini for AI
 
 from config import (
-    PAGE_ACCESS_TOKEN, BASE_URL, GEMINI_API_KEY, GEMINI_MODEL,
-    GEMINI_API_URL, GEMINI_FALLBACK_MODELS, get_gemini_url,
-    DATA_DIR, COURSES, GMAIL_ENABLED, KEYWORD_REPLIES
+    PAGE_ACCESS_TOKEN, BASE_URL, GEMINI_MODEL,
+    GEMINI_FALLBACK_MODELS, get_gemini_url,
+    DATA_DIR, KEYWORD_REPLIES
 )
+from storage import file_lock, load_json, save_json
 
 PHT = timezone(timedelta(hours=8))
 CONVERSATIONS_FILE = os.path.join(DATA_DIR, "dm_conversations.json")
@@ -64,19 +65,41 @@ STATE_IDLE = "idle"
 STATE_WAITING_EMAIL = "waiting_email"
 STATE_CHECKING_PAYMENT = "checking_payment"
 
+# If a user's state hasn't changed in this long, reset it on their next message.
+# Prevents "waiting_email" from persisting for weeks and hijacking random messages.
+CONVERSATION_STATE_TTL_SECONDS = 60 * 60  # 1 hour
+
 
 def _load_conversations():
     """Load DM conversation states."""
-    if os.path.exists(CONVERSATIONS_FILE):
-        with open(CONVERSATIONS_FILE) as f:
-            return json.load(f)
-    return {}
+    return load_json(CONVERSATIONS_FILE, {})
 
 
 def _save_conversations(convos):
-    """Save DM conversation states."""
-    with open(CONVERSATIONS_FILE, "w") as f:
-        json.dump(convos, f, indent=2, ensure_ascii=False)
+    """Save DM conversation states (atomic)."""
+    save_json(CONVERSATIONS_FILE, convos)
+
+
+def _maybe_reset_stale_state(convo):
+    """Reset conversation state to IDLE if it's been idle too long."""
+    state_since = convo.get("state_since")
+    if not state_since or convo.get("state") == STATE_IDLE:
+        return
+    try:
+        last = datetime.fromisoformat(state_since)
+        age = (datetime.now(PHT) - last).total_seconds()
+        if age > CONVERSATION_STATE_TTL_SECONDS:
+            print(f"[AI Buddy] Resetting stale state {convo.get('state')} (age {int(age)}s)")
+            _set_state(convo, STATE_IDLE)
+            convo["state_since"] = datetime.now(PHT).isoformat()
+    except Exception:
+        convo["state"] = STATE_IDLE
+        convo["state_since"] = datetime.now(PHT).isoformat()
+
+
+def _set_state(convo, new_state):
+    convo["state"] = new_state
+    convo["state_since"] = datetime.now(PHT).isoformat()
 
 
 def send_fb_message(recipient_id, message_text):
@@ -143,39 +166,48 @@ def is_email(text):
 
 
 def search_xendit_payment(email):
-    """Search Gmail for Xendit payment invoice matching the email.
-    Uses MCP CLI if available, otherwise returns None.
+    """Search Gmail for a Xendit payment invoice matching `email`.
+
+    Returns one of:
+      {"found": True,  "email": ..., "subject": ..., "date": ...}
+      {"found": False, "email": ..., "unavailable": False}  # searched, nothing found
+      {"found": False, "email": ..., "unavailable": True}   # can't search (no CLI)
+
+    The "unavailable" flag lets callers tell the student "I couldn't auto-check,
+    Karl will verify manually" instead of incorrectly saying "no payment found".
     """
+    # Is the Manus MCP CLI installed on this host? On Railway/Render it won't be.
+    from shutil import which
+    if which("manus-mcp-cli") is None:
+        print("[AI Buddy] manus-mcp-cli not installed - skipping Gmail search")
+        return {"found": False, "email": email, "unavailable": True}
+
     try:
-        # Try using manus-mcp-cli for Gmail search
         result = subprocess.run(
             ["manus-mcp-cli", "tool", "call", "gmail_search_messages",
              "--server", "gmail",
              "--input", json.dumps({"query": f"from:noreply@xendit.co {email}", "maxResults": 5})],
             capture_output=True, text=True, timeout=30
         )
-        
+
         if result.returncode == 0 and result.stdout:
-            # Parse the result
             data = json.loads(result.stdout)
             messages = data.get("messages", [])
-            
             for msg in messages:
                 subject = msg.get("subject", "")
                 if "INVOICE PAID" in subject.upper():
-                    # Try to extract course and amount from subject
                     return {
                         "found": True,
                         "email": email,
                         "subject": subject,
                         "date": msg.get("date", ""),
                     }
-        
-        return {"found": False, "email": email}
-        
+
+        return {"found": False, "email": email, "unavailable": False}
+
     except Exception as e:
         print(f"[AI Buddy] Gmail search error: {e}")
-        return {"found": False, "email": email, "error": str(e)}
+        return {"found": False, "email": email, "unavailable": True, "error": str(e)}
 
 
 def generate_smart_reply(sender_name, message_text, conversation_state):
@@ -222,18 +254,25 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
     if not sender_name:
         sender_name = get_sender_name(sender_id)
 
-    convos = _load_conversations()
-    sender_key = str(sender_id)
+    # Load conversations under lock, then release so we don't hold it
+    # across slow API calls.
+    with file_lock(CONVERSATIONS_FILE):
+        convos = _load_conversations()
 
-    # Get or create conversation state
+    sender_key = str(sender_id)
     if sender_key not in convos:
         convos[sender_key] = {
             "state": STATE_IDLE,
+            "state_since": datetime.now(PHT).isoformat(),
             "name": sender_name,
             "messages": [],
         }
 
     convo = convos[sender_key]
+
+    # Reset stale state (e.g. waiting_email from weeks ago).
+    _maybe_reset_stale_state(convo)
+
     convo["messages"].append({
         "text": message_text,
         "time": datetime.now(PHT).isoformat(),
@@ -292,7 +331,7 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
 
     if email:
         # Student provided email - check payment
-        convo["state"] = STATE_CHECKING_PAYMENT
+        _set_state(convo, STATE_CHECKING_PAYMENT)
         convo["email"] = email
 
         # Send acknowledgment
@@ -335,10 +374,36 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
             urgent += f"✅ /done {ticket['id'] if ticket else '?'} - kapag resolved na"
             send_telegram(urgent)
 
-            convo["state"] = STATE_IDLE
+            _set_state(convo, STATE_IDLE)
+
+        elif payment and payment.get("unavailable"):
+            # Auto Gmail search is disabled/unavailable - forward to Karl for manual check
+            send_fb_message(
+                sender_id,
+                f"Salamat sa email mo ({email})! 📧\n\n"
+                f"I-forward ko kay Sir Karl para ma-check niya agad ang payment at enrollment mo. "
+                f"Mag-aantay lang po. 😊"
+            )
+
+            ticket = create_no_payment_ticket(
+                student_name=sender_name,
+                student_email=email,
+                fb_sender_id=sender_id,
+            )
+
+            notif = f"📧 *Student needs manual payment check*\n"
+            notif += f"━━━━━━━━━━━━━━━━━━\n"
+            notif += f"👤 Student: {sender_name}\n"
+            notif += f"📧 Email: {email}\n"
+            notif += f"ℹ️ Auto Gmail check unavailable - please verify manually.\n"
+            if ticket:
+                notif += f"🎫 Ticket: #{ticket['id']}\n"
+            send_telegram(notif)
+
+            _set_state(convo, STATE_IDLE)
 
         else:
-            # No payment found
+            # Auto search ran but found nothing
             send_fb_message(
                 sender_id,
                 f"Hmm, hindi ko makita ang payment record para sa {email}. 🤔\n\n"
@@ -348,14 +413,12 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
                 f"Pwede mo i-try ang ibang email, o mag-message ka ulit with your payment screenshot para ma-verify namin. 😊"
             )
 
-            # Create no-payment ticket
             ticket = create_no_payment_ticket(
                 student_name=sender_name,
                 student_email=email,
                 fb_sender_id=sender_id,
             )
 
-            # Telegram notification
             notif = f"⚠️ *Student Payment Not Found*\n"
             notif += f"━━━━━━━━━━━━━━━━━━\n"
             notif += f"👤 Student: {sender_name}\n"
@@ -366,7 +429,7 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
             notif += f"\n⚠️ May need manual check"
             send_telegram(notif)
 
-            convo["state"] = STATE_IDLE
+            _set_state(convo, STATE_IDLE)
 
     elif is_vpn_inquiry:
         # VPN inquiry - auto-reply with GCash payment info
@@ -394,7 +457,7 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
 
     elif is_enrollment_inquiry(message_text):
         # Student has enrollment/access issue - ask for email
-        convo["state"] = STATE_WAITING_EMAIL
+        _set_state(convo, STATE_WAITING_EMAIL)
 
         reply = (
             f"Hi {sender_name}! \U0001f44b\n\n"
@@ -452,4 +515,8 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
                     "direction": "out",
                 })
 
-    _save_conversations(convos)
+    # Merge our changes back under lock to reduce the race window.
+    with file_lock(CONVERSATIONS_FILE):
+        current = _load_conversations()
+        current[sender_key] = convo
+        _save_conversations(current)

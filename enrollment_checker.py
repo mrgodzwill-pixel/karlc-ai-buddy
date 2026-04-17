@@ -4,18 +4,30 @@ Identifies students who paid but haven't completed enrollment.
 """
 
 import json
+import logging
 import os
 import re
 import subprocess
 from datetime import datetime, timedelta, timezone
+from shutil import which
 
-from config import DATA_DIR, GMAIL_ENABLED
+from config import DATA_DIR, GMAIL_ENABLED, OWNER_EMAIL
 
 PHT = timezone(timedelta(hours=8))
+logger = logging.getLogger(__name__)
+
+
+def _mcp_available() -> bool:
+    """Gmail access depends on the manus-mcp-cli binary. On Railway/Render it
+    won't exist, in which case enrollment comparison is skipped."""
+    return which("manus-mcp-cli") is not None
 
 
 def _run_gmail_search(query, max_results=20):
-    """Run Gmail search via MCP CLI."""
+    """Run Gmail search via MCP CLI. Returns None if the CLI isn't installed
+    or if the call fails."""
+    if not _mcp_available():
+        return None
     try:
         result = subprocess.run(
             ["manus-mcp-cli", "tool", "call", "gmail_search_messages",
@@ -24,20 +36,21 @@ def _run_gmail_search(query, max_results=20):
             capture_output=True, text=True, timeout=60
         )
         if result.returncode == 0:
-            # Find the result file
             import glob
             files = sorted(glob.glob("/tmp/manus-mcp/mcp_result_*.json"), key=os.path.getmtime, reverse=True)
             if files:
                 with open(files[0]) as f:
                     return json.load(f)
         return None
-    except Exception as e:
-        print(f"[Enrollment] Gmail search error: {e}")
+    except Exception:
+        logger.exception("Gmail search failed")
         return None
 
 
 def _run_gmail_read(thread_ids):
-    """Read full email threads via MCP CLI."""
+    """Read full email threads via MCP CLI. Returns None if unavailable."""
+    if not _mcp_available():
+        return None
     try:
         result = subprocess.run(
             ["manus-mcp-cli", "tool", "call", "gmail_read_threads",
@@ -52,8 +65,8 @@ def _run_gmail_read(thread_ids):
                 with open(files[0]) as f:
                     return json.load(f)
         return None
-    except Exception as e:
-        print(f"[Enrollment] Gmail read error: {e}")
+    except Exception:
+        logger.exception("Gmail read failed")
         return None
 
 
@@ -110,10 +123,11 @@ def _extract_amount(text):
 
 def _extract_enrolment_email(text):
     """Extract student email from New Enrolment email body."""
-    # Look for email patterns in the body
     emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
-    # Filter out system emails
-    system_emails = ["noreply@xendit.co", "mr.godzwill@gmail.com", "noreply@systeme.io"]
+    # Filter out known system / owner emails so the student email remains.
+    system_emails = {"noreply@xendit.co", "noreply@systeme.io"}
+    if OWNER_EMAIL:
+        system_emails.add(OWNER_EMAIL)
     student_emails = [e.lower() for e in emails if e.lower() not in system_emails]
     return student_emails[0] if student_emails else None
 
@@ -121,12 +135,31 @@ def _extract_enrolment_email(text):
 def compare_payments_vs_enrolments(days_back=7):
     """Compare Xendit payments with Systeme.io enrollments."""
     print(f"[Enrollment] Comparing last {days_back} days...")
+
+    if not _mcp_available():
+        print("[Enrollment] manus-mcp-cli not installed - skipping enrollment check")
+        return {
+            "total_payments": 0,
+            "total_enrolments": 0,
+            "matched": 0,
+            "unmatched": 0,
+            "matched_students": [],
+            "unmatched_students": [],
+            "payments": [],
+            "enrolments": [],
+            "unavailable": True,
+            "checked_at": datetime.now(PHT).isoformat(),
+        }
     
     # Search for Xendit invoices
     xendit_search = _run_gmail_search(f"from:noreply@xendit.co INVOICE PAID newer_than:{days_back}d")
     
-    # Search for New Enrolment emails
-    enrolment_search = _run_gmail_search(f"from:mr.godzwill@gmail.com New Enrolment newer_than:{days_back}d")
+    # Search for New Enrolment emails.
+    # If OWNER_EMAIL is set, scope the search to it; otherwise search any sender.
+    sender_filter = f"from:{OWNER_EMAIL} " if OWNER_EMAIL else ""
+    enrolment_search = _run_gmail_search(
+        f"{sender_filter}New Enrolment newer_than:{days_back}d"
+    )
     
     # Parse Xendit invoices
     payments = []
@@ -230,6 +263,15 @@ def compare_payments_vs_enrolments(days_back=7):
 
 def format_comparison_telegram(report):
     """Format the comparison report for Telegram."""
+    if report.get("unavailable"):
+        return (
+            "📊 *Enrollment Comparison*\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "ℹ️ Gmail auto-check is not available in this environment.\n"
+            "(`manus-mcp-cli` not installed — this only works inside the Manus sandbox.)\n\n"
+            "Please verify enrollments manually or deploy with Gmail API integration."
+        )
+
     msg = "📊 *Enrollment Comparison Report*\n"
     msg += f"🕐 {report['checked_at'][:16]} PHT\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
