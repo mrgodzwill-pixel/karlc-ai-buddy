@@ -15,11 +15,12 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 from config import (
-    TELEGRAM_API_URL, TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN,
-    PAGE_NAME, GEMINI_API_KEY, GEMINI_MODEL, GEMINI_API_URL,
+    TELEGRAM_API_URL, TELEGRAM_CHAT_ID,
+    PAGE_NAME, GEMINI_MODEL,
     GEMINI_FALLBACK_MODELS, get_gemini_url,
-    AI_BUDDY_SYSTEM_PROMPT, DATA_DIR, COURSES
+    AI_BUDDY_SYSTEM_PROMPT, DATA_DIR
 )
+from storage import file_lock, load_json, save_json
 
 PHT = timezone(timedelta(hours=8))
 MAX_MSG_LENGTH = 4096
@@ -497,9 +498,11 @@ def process_message(text):
             send_message(f"❌ Error: {str(e)[:200]}")
         return "skip_all"
 
-    if text_lower.startswith("/approve"):
-        parts = text_lower.replace("/approve", "").strip().split()
-        numbers = [int(p) for p in parts if p.isdigit()]
+    # Match `/approve 1 2 3` but not `/approve_all` (handled above).
+    # We split on whitespace and check the first token is exactly `/approve`.
+    tokens = text_lower.split()
+    if tokens and tokens[0] == "/approve":
+        numbers = [int(p) for p in tokens[1:] if p.isdigit()]
         if numbers:
             try:
                 from fb_agent import approve_replies
@@ -507,11 +510,12 @@ def process_message(text):
                 send_approval_results(results)
             except Exception as e:
                 send_message(f"❌ Error: {str(e)[:200]}")
+        else:
+            send_message("Usage: /approve 1 2 3")
         return "approve"
 
-    if text_lower.startswith("/skip"):
-        parts = text_lower.replace("/skip", "").strip().split()
-        numbers = [int(p) for p in parts if p.isdigit()]
+    if tokens and tokens[0] == "/skip":
+        numbers = [int(p) for p in tokens[1:] if p.isdigit()]
         if numbers:
             try:
                 from fb_agent import approve_replies
@@ -519,6 +523,8 @@ def process_message(text):
                 send_approval_results(results)
             except Exception as e:
                 send_message(f"❌ Error: {str(e)[:200]}")
+        else:
+            send_message("Usage: /skip 1 2 3")
         return "skip"
 
     if text_lower == "/keywords":
@@ -543,9 +549,8 @@ def process_message(text):
             send_message(f"❌ Error: {str(e)[:200]}")
         return "enrollment"
 
-    if text_lower.startswith("/done"):
-        parts = text_lower.replace("/done", "").strip().split()
-        numbers = [int(p) for p in parts if p.isdigit()]
+    if tokens and tokens[0] == "/done":
+        numbers = [int(p) for p in tokens[1:] if p.isdigit()]
         if numbers:
             resolve_tickets(numbers)
         else:

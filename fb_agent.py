@@ -102,9 +102,10 @@ def _save_json(filepath, data):
 
 
 def match_keyword(text):
-    """Check if text matches any keyword."""
+    """Check if text matches any keyword. Longest keywords win so that
+    'dual isp' beats 'isp', and 'solar' beats 'how much'."""
     text_lower = text.lower()
-    for keyword in KEYWORD_REPLIES:
+    for keyword in sorted(KEYWORD_REPLIES.keys(), key=len, reverse=True):
         if keyword.lower() in text_lower:
             return keyword
     return None

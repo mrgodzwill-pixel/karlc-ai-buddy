@@ -6,12 +6,11 @@ All sensitive values are loaded from environment variables for security.
 import os
 
 # === Facebook Page Config ===
-PAGE_ID = os.environ.get("FB_PAGE_ID", "110704956970982")
+PAGE_ID = os.environ.get("FB_PAGE_ID", "")
 PAGE_NAME = os.environ.get("FB_PAGE_NAME", "Karl C")
 PAGE_ACCESS_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN", "")
-USER_ACCESS_TOKEN = os.environ.get("FB_USER_ACCESS_TOKEN", "")
 FB_APP_SECRET = os.environ.get("FB_APP_SECRET", "")
-WEBHOOK_VERIFY_TOKEN = os.environ.get("FB_VERIFY_TOKEN", "karlc_agent_2026")
+WEBHOOK_VERIFY_TOKEN = os.environ.get("FB_VERIFY_TOKEN", "")
 BASE_URL = "https://graph.facebook.com/v19.0"
 
 # === Telegram Config ===
@@ -21,14 +20,18 @@ TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 # === Google Gemini Config ===
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
-GEMINI_FALLBACK_MODELS = ["gemini-3-flash-preview", "gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-2.5-flash"]
-GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_FALLBACK_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash-lite"]
 
 def get_gemini_url(model=None):
-    """Get Gemini API URL for a specific model."""
+    """Build the Gemini API URL for a given model. Resolves the API key lazily
+    so a late-loaded env var still works."""
     m = model or GEMINI_MODEL
-    return f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={GEMINI_API_KEY}"
+    key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
+    return f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
+
+# === Owner / operator email (used to filter system emails out of enrollment scans) ===
+OWNER_EMAIL = os.environ.get("OWNER_EMAIL", "").lower()
 
 # === Gmail MCP Config (for enrollment checker) ===
 # Gmail access is via Manus MCP - for external deployment we use IMAP or API
