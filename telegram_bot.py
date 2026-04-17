@@ -535,7 +535,20 @@ def process_message(text):
         send_tickets()
         return "tickets"
 
-    if text_lower == "/enrollment":
+    # /enrollment command OR natural-language ask ("check enrollments",
+    # "enrollment status", "paid but not enrolled", etc.) — both run the check
+    # on demand so Karl can get data anytime, not just on the 7AM/7PM reports.
+    _enrollment_phrases = (
+        "check enrollment", "check enrolment",
+        "enrollment check", "enrolment check",
+        "enrollment status", "enrolment status",
+        "enrollment report", "enrolment report",
+        "run enrollment", "run enrolment",
+        "compare payment", "compare enrollment", "compare enrolment",
+        "paid but not enrolled", "paid not enrolled",
+        "who paid but",
+    )
+    if text_lower == "/enrollment" or any(p in text_lower for p in _enrollment_phrases):
         send_message("⏳ Running enrollment comparison... sandali lang Boss!")
         try:
             from fb_agent import run_enrollment_check
