@@ -35,6 +35,10 @@ MAX_PROCESSED_MIDS = 1000
 # Optional shared secret to protect debug endpoints (/messages, /health details)
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
+# Set SKIP_WEBHOOK_SIGNATURE=true in Railway to bypass HMAC check temporarily.
+# Useful for debugging. Set back to false once DMs are confirmed working.
+SKIP_WEBHOOK_SIGNATURE = os.environ.get("SKIP_WEBHOOK_SIGNATURE", "false").lower() == "true"
+
 
 def _load_json(path, default):
     if not os.path.exists(path):
@@ -148,8 +152,10 @@ def verify_webhook():
 @app.route("/webhook", methods=["POST"])
 def handle_webhook():
     """Handle incoming webhook events from Facebook."""
-    if not _verify_fb_signature(request):
-        logger.warning("Invalid FB webhook signature - rejecting")
+    if SKIP_WEBHOOK_SIGNATURE:
+        logger.warning("SKIP_WEBHOOK_SIGNATURE=true — skipping signature check (debug mode)")
+    elif not _verify_fb_signature(request):
+        logger.warning("Invalid FB webhook signature - rejecting (set SKIP_WEBHOOK_SIGNATURE=true to bypass for debugging)")
         abort(403)
 
     data = request.get_json(silent=True)
