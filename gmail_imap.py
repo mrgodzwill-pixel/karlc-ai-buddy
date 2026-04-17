@@ -38,7 +38,13 @@ def _connect():
     try:
         mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
         mail.login(user, password)
-        mail.select("INBOX", readonly=True)
+        # Use "All Mail" (not INBOX) so messages auto-filtered to labels — e.g.
+        # a Gmail filter that moves Xendit invoices out of the inbox — are
+        # still found. INBOX-only would miss anything with a "skip inbox" rule.
+        typ, _ = mail.select('"[Gmail]/All Mail"', readonly=True)
+        if typ != "OK":
+            # Fallback for non-English Gmail locales or unusual setups.
+            mail.select("INBOX", readonly=True)
         return mail
     except Exception:
         logger.exception("Gmail IMAP connect failed")
