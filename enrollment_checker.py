@@ -119,12 +119,13 @@ def compare_payments_vs_enrolments(days_back=7):
         print("[Enrollment] GMAIL_USER/GMAIL_APP_PASSWORD not set - skipping enrollment check")
         return _unavailable_report()
 
-    # Search Xendit invoice emails. Broadened from `noreply@xendit.co` to any
-    # xendit.co sender because the actual sender varies (noreply, no-reply,
-    # mailer, etc.). We then filter by subject / payer-email extraction so we
-    # only count real paid invoices.
+    # Search Xendit invoice emails. Xendit's actual sender is
+    # `notifications@xendit.co` (not `noreply@...`). Use `from:xendit` so
+    # Gmail matches any sender containing "xendit" — catches any local-part
+    # or TLD variant. We post-filter by subject + payer-email extraction so
+    # only real paid invoices are counted.
     xendit_msgs = gmail_imap.search(
-        f"from:xendit.co newer_than:{days_back}d",
+        f"from:xendit newer_than:{days_back}d",
         limit=50,
     )
     if xendit_msgs is None:
