@@ -33,9 +33,12 @@ def get_gemini_url(model=None):
 # === Owner / operator email (used to filter system emails out of enrollment scans) ===
 OWNER_EMAIL = os.environ.get("OWNER_EMAIL", "").lower()
 
-# === Gmail MCP Config (for enrollment checker) ===
-# Gmail access is via Manus MCP - for external deployment we use IMAP or API
-GMAIL_ENABLED = os.environ.get("GMAIL_ENABLED", "false").lower() == "true"
+# === Gmail IMAP Config (for enrollment checker & Xendit lookups) ===
+# See gmail_imap.py. Enable by setting GMAIL_USER and GMAIL_APP_PASSWORD
+# (a 16-character Google App Password, NOT your regular account password).
+GMAIL_USER = os.environ.get("GMAIL_USER", "")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+GMAIL_ENABLED = bool(GMAIL_USER and GMAIL_APP_PASSWORD)
 
 # === Directories ===
 DATA_DIR = os.environ.get("DATA_DIR", "/home/ubuntu/karlc-ai-buddy/data")

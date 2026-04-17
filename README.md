@@ -7,7 +7,7 @@ A 24/7 AI-powered personal assistant for managing the "Karl C" Facebook Page, co
 - **Facebook DM Handler**: Gemini AI-powered auto-reply for student inquiries
 - **Comment Monitoring**: Compiles comments and suggests keyword-based replies
 - **Student Ticket System**: Tracks enrollment issues with pending/done states
-- **Enrollment Checker**: Compares Xendit payments vs Systeme.io enrollments (requires Manus MCP CLI)
+- **Enrollment Checker**: Compares Xendit payments vs Systeme.io enrollments (requires Gmail IMAP)
 - **Telegram Bot**: Full command interface + natural language Gemini AI chat
 - **Scheduled Reports**: 7AM & 7PM Philippine Time, daily, via Telegram
 
@@ -78,14 +78,14 @@ If any of these are missing, the app will log a warning on startup.
 | `/report` | Generate report now |
 | `/tickets` | View pending tickets |
 | `/done 1` | Resolve ticket #1 |
-| `/enrollment` | Run enrollment check (requires MCP CLI) |
+| `/enrollment` | Run enrollment check (requires Gmail IMAP env vars) |
 | `/approve_all` | Approve all suggested replies |
 | `/status` | Check agent status |
 | Or just chat naturally! | AI-powered conversation |
 
 ## Known limitations
 
-- **Enrollment checker** relies on the `manus-mcp-cli` binary and only works inside the Manus sandbox. On Railway/Render it is automatically skipped and the `/enrollment` command will report that it is unavailable.
+- **Enrollment checker** reads Gmail over IMAP. Set `GMAIL_USER` and `GMAIL_APP_PASSWORD` (a 16-char Google App Password, not your regular password — generate one at https://myaccount.google.com/apppasswords after turning on 2-Step Verification). If either env var is unset, the `/enrollment` command reports that Gmail is unavailable and skips the check.
 - **No database** — JSON files only. Fine for Karl's volume, but see the data persistence warning above.
 - **Single process** — this is not built to scale horizontally.
 

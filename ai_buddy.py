@@ -6,15 +6,14 @@ Handles student inquiries via Facebook Messenger with Gemini AI intelligence.
 - Creates tickets and sends urgent Telegram notifications
 """
 
-import json
 import os
 import re
-import subprocess
 import time
 import requests
 from datetime import datetime, timedelta, timezone
 # Using Google Gemini for AI
 
+import gmail_imap
 from config import (
     PAGE_ACCESS_TOKEN, BASE_URL, GEMINI_MODEL,
     GEMINI_FALLBACK_MODELS, get_gemini_url,
@@ -171,43 +170,30 @@ def search_xendit_payment(email):
     Returns one of:
       {"found": True,  "email": ..., "subject": ..., "date": ...}
       {"found": False, "email": ..., "unavailable": False}  # searched, nothing found
-      {"found": False, "email": ..., "unavailable": True}   # can't search (no CLI)
+      {"found": False, "email": ..., "unavailable": True}   # Gmail IMAP not configured / failed
 
     The "unavailable" flag lets callers tell the student "I couldn't auto-check,
     Karl will verify manually" instead of incorrectly saying "no payment found".
     """
-    # Is the Manus MCP CLI installed on this host? On Railway/Render it won't be.
-    from shutil import which
-    if which("manus-mcp-cli") is None:
-        print("[AI Buddy] manus-mcp-cli not installed - skipping Gmail search")
+    if not gmail_imap.available():
+        print("[AI Buddy] GMAIL_USER/GMAIL_APP_PASSWORD not set - skipping Gmail search")
         return {"found": False, "email": email, "unavailable": True}
 
-    try:
-        result = subprocess.run(
-            ["manus-mcp-cli", "tool", "call", "gmail_search_messages",
-             "--server", "gmail",
-             "--input", json.dumps({"query": f"from:noreply@xendit.co {email}", "maxResults": 5})],
-            capture_output=True, text=True, timeout=30
-        )
+    messages = gmail_imap.search(f"from:noreply@xendit.co {email}", limit=5)
+    if messages is None:
+        return {"found": False, "email": email, "unavailable": True}
 
-        if result.returncode == 0 and result.stdout:
-            data = json.loads(result.stdout)
-            messages = data.get("messages", [])
-            for msg in messages:
-                subject = msg.get("subject", "")
-                if "INVOICE PAID" in subject.upper():
-                    return {
-                        "found": True,
-                        "email": email,
-                        "subject": subject,
-                        "date": msg.get("date", ""),
-                    }
+    for msg in messages:
+        subject = msg.get("subject", "")
+        if "INVOICE PAID" in subject.upper():
+            return {
+                "found": True,
+                "email": email,
+                "subject": subject,
+                "date": msg.get("date", ""),
+            }
 
-        return {"found": False, "email": email, "unavailable": False}
-
-    except Exception as e:
-        print(f"[AI Buddy] Gmail search error: {e}")
-        return {"found": False, "email": email, "unavailable": True, "error": str(e)}
+    return {"found": False, "email": email, "unavailable": False}
 
 
 def generate_smart_reply(sender_name, message_text, conversation_state):
