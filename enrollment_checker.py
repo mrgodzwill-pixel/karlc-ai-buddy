@@ -1,73 +1,22 @@
 """
 Enrollment Checker - Compares Xendit payments vs Systeme.io enrollments.
 Identifies students who paid but haven't completed enrollment.
+
+Gmail access is via IMAP + a Gmail App Password (see gmail_imap.py).
+On Railway/Render set GMAIL_USER and GMAIL_APP_PASSWORD to enable.
 """
 
 import json
 import logging
 import os
 import re
-import subprocess
 from datetime import datetime, timedelta, timezone
-from shutil import which
 
-from config import DATA_DIR, GMAIL_ENABLED, OWNER_EMAIL
+import gmail_imap
+from config import DATA_DIR, OWNER_EMAIL
 
 PHT = timezone(timedelta(hours=8))
 logger = logging.getLogger(__name__)
-
-
-def _mcp_available() -> bool:
-    """Gmail access depends on the manus-mcp-cli binary. On Railway/Render it
-    won't exist, in which case enrollment comparison is skipped."""
-    return which("manus-mcp-cli") is not None
-
-
-def _run_gmail_search(query, max_results=20):
-    """Run Gmail search via MCP CLI. Returns None if the CLI isn't installed
-    or if the call fails."""
-    if not _mcp_available():
-        return None
-    try:
-        result = subprocess.run(
-            ["manus-mcp-cli", "tool", "call", "gmail_search_messages",
-             "--server", "gmail",
-             "--input", json.dumps({"query": query, "maxResults": max_results})],
-            capture_output=True, text=True, timeout=60
-        )
-        if result.returncode == 0:
-            import glob
-            files = sorted(glob.glob("/tmp/manus-mcp/mcp_result_*.json"), key=os.path.getmtime, reverse=True)
-            if files:
-                with open(files[0]) as f:
-                    return json.load(f)
-        return None
-    except Exception:
-        logger.exception("Gmail search failed")
-        return None
-
-
-def _run_gmail_read(thread_ids):
-    """Read full email threads via MCP CLI. Returns None if unavailable."""
-    if not _mcp_available():
-        return None
-    try:
-        result = subprocess.run(
-            ["manus-mcp-cli", "tool", "call", "gmail_read_threads",
-             "--server", "gmail",
-             "--input", json.dumps({"threadIds": thread_ids})],
-            capture_output=True, text=True, timeout=60
-        )
-        if result.returncode == 0:
-            import glob
-            files = sorted(glob.glob("/tmp/manus-mcp/mcp_result_*.json"), key=os.path.getmtime, reverse=True)
-            if files:
-                with open(files[0]) as f:
-                    return json.load(f)
-        return None
-    except Exception:
-        logger.exception("Gmail read failed")
-        return None
 
 
 def _extract_payer_email(text):
@@ -84,10 +33,12 @@ def _extract_payer_email(text):
 
 
 def _extract_course_from_subject(subject):
-    """Extract course name from Xendit invoice subject."""
-    # Subject format: "INVOICE PAID: karlcw-course-name-price-id"
+    """Extract course name from Xendit invoice subject.
+
+    Subject format: "INVOICE PAID: karlcw-course-name-price-id"
+    """
     subject_lower = subject.lower()
-    
+
     course_map = {
         "quickstart": "MikroTik Basic (QuickStart)",
         "dual-isp": "MikroTik Dual-ISP",
@@ -99,11 +50,11 @@ def _extract_course_from_subject(subject):
         "solar": "DIY Hybrid Solar",
         "bundle": "Course Bundle",
     }
-    
+
     for key, name in course_map.items():
         if key in subject_lower:
             return name
-    
+
     return subject.split(":")[-1].strip() if ":" in subject else subject
 
 
@@ -132,115 +83,86 @@ def _extract_enrolment_email(text):
     return student_emails[0] if student_emails else None
 
 
+def _unavailable_report():
+    return {
+        "total_payments": 0,
+        "total_enrolments": 0,
+        "matched": 0,
+        "unmatched": 0,
+        "matched_students": [],
+        "unmatched_students": [],
+        "payments": [],
+        "enrolments": [],
+        "unavailable": True,
+        "checked_at": datetime.now(PHT).isoformat(),
+    }
+
+
 def compare_payments_vs_enrolments(days_back=7):
     """Compare Xendit payments with Systeme.io enrollments."""
     print(f"[Enrollment] Comparing last {days_back} days...")
 
-    if not _mcp_available():
-        print("[Enrollment] manus-mcp-cli not installed - skipping enrollment check")
-        return {
-            "total_payments": 0,
-            "total_enrolments": 0,
-            "matched": 0,
-            "unmatched": 0,
-            "matched_students": [],
-            "unmatched_students": [],
-            "payments": [],
-            "enrolments": [],
-            "unavailable": True,
-            "checked_at": datetime.now(PHT).isoformat(),
-        }
-    
-    # Search for Xendit invoices
-    xendit_search = _run_gmail_search(f"from:noreply@xendit.co INVOICE PAID newer_than:{days_back}d")
-    
-    # Search for New Enrolment emails.
+    if not gmail_imap.available():
+        print("[Enrollment] GMAIL_USER/GMAIL_APP_PASSWORD not set - skipping enrollment check")
+        return _unavailable_report()
+
+    # Search Xendit invoice emails
+    xendit_msgs = gmail_imap.search(
+        f"from:noreply@xendit.co INVOICE PAID newer_than:{days_back}d",
+        limit=30,
+    )
+    if xendit_msgs is None:
+        # IMAP configured but connect failed; treat as unavailable.
+        return _unavailable_report()
+
+    payments = []
+    for m in xendit_msgs:
+        subject = m.get("subject", "")
+        if "INVOICE PAID" not in subject.upper():
+            continue
+        body = m.get("body", "")
+        payer_email = _extract_payer_email(body)
+        if not payer_email:
+            continue
+        payments.append({
+            "email": payer_email,
+            "course": _extract_course_from_subject(subject),
+            "amount": _extract_amount(body),
+            "subject": subject,
+            "date": m.get("date", ""),
+        })
+
+    print(f"[Enrollment] Found {len(payments)} Xendit invoices (with payer emails)")
+
+    # Search enrollment confirmation emails.
     # If OWNER_EMAIL is set, scope the search to it; otherwise search any sender.
     sender_filter = f"from:{OWNER_EMAIL} " if OWNER_EMAIL else ""
-    enrolment_search = _run_gmail_search(
-        f"{sender_filter}New Enrolment newer_than:{days_back}d"
+    enrolment_msgs = gmail_imap.search(
+        f"{sender_filter}New Enrolment newer_than:{days_back}d",
+        limit=30,
     )
-    
-    # Parse Xendit invoices
-    payments = []
-    if xendit_search:
-        # Get thread IDs for Xendit invoices
-        xendit_threads = []
-        all_messages = xendit_search if isinstance(xendit_search, list) else xendit_search.get("messages", [])
-        
-        for msg in all_messages:
-            if isinstance(msg, dict):
-                subject = msg.get("subject", "")
-                thread_id = msg.get("threadId", msg.get("id", ""))
-                if "INVOICE PAID" in subject.upper():
-                    xendit_threads.append(thread_id)
-        
-        # Read full threads to get payer emails
-        if xendit_threads:
-            thread_data = _run_gmail_read(xendit_threads[:10])
-            if thread_data:
-                threads = thread_data if isinstance(thread_data, list) else thread_data.get("threads", [])
-                for thread in threads:
-                    messages = thread.get("messages", []) if isinstance(thread, dict) else []
-                    for msg in messages:
-                        subject = msg.get("subject", "")
-                        body = msg.get("markdown", msg.get("body", ""))
-                        
-                        if "INVOICE PAID" in subject.upper():
-                            payer_email = _extract_payer_email(body)
-                            if payer_email:
-                                payments.append({
-                                    "email": payer_email,
-                                    "course": _extract_course_from_subject(subject),
-                                    "amount": _extract_amount(body),
-                                    "subject": subject,
-                                    "date": msg.get("date", ""),
-                                })
-    
-    print(f"[Enrollment] Found {len(payments)} Xendit invoices (with payer emails)")
-    
-    # Parse enrollments
+    if enrolment_msgs is None:
+        enrolment_msgs = []
+
     enrolments = []
-    if enrolment_search:
-        enrolment_threads = []
-        all_messages = enrolment_search if isinstance(enrolment_search, list) else enrolment_search.get("messages", [])
-        
-        for msg in all_messages:
-            if isinstance(msg, dict):
-                subject = msg.get("subject", "")
-                thread_id = msg.get("threadId", msg.get("id", ""))
-                if "enrol" in subject.lower() or "new" in subject.lower():
-                    enrolment_threads.append(thread_id)
-        
-        if enrolment_threads:
-            thread_data = _run_gmail_read(enrolment_threads[:10])
-            if thread_data:
-                threads = thread_data if isinstance(thread_data, list) else thread_data.get("threads", [])
-                for thread in threads:
-                    messages = thread.get("messages", []) if isinstance(thread, dict) else []
-                    for msg in messages:
-                        body = msg.get("markdown", msg.get("body", ""))
-                        student_email = _extract_enrolment_email(body)
-                        if student_email:
-                            enrolments.append({
-                                "email": student_email,
-                                "date": msg.get("date", ""),
-                            })
-    
+    for m in enrolment_msgs:
+        subject_lower = m.get("subject", "").lower()
+        if "enrol" not in subject_lower and "new" not in subject_lower:
+            continue
+        student_email = _extract_enrolment_email(m.get("body", ""))
+        if student_email:
+            enrolments.append({
+                "email": student_email,
+                "date": m.get("date", ""),
+            })
+
     print(f"[Enrollment] Found {len(enrolments)} enrolment confirmations")
-    
-    # Compare
-    enrolled_emails = set(e["email"] for e in enrolments)
-    
-    matched = []
-    unmatched = []
-    
+
+    enrolled_emails = {e["email"] for e in enrolments}
+    matched, unmatched = [], []
     for p in payments:
-        if p["email"] in enrolled_emails:
-            matched.append(p)
-        else:
-            unmatched.append(p)
-    
+        (matched if p["email"] in enrolled_emails else unmatched).append(p)
+
     report = {
         "total_payments": len(payments),
         "total_enrolments": len(enrolments),
@@ -252,12 +174,14 @@ def compare_payments_vs_enrolments(days_back=7):
         "enrolments": enrolments,
         "checked_at": datetime.now(PHT).isoformat(),
     }
-    
-    # Save report
+
     report_file = os.path.join(DATA_DIR, "enrollment_report.json")
-    with open(report_file, "w") as f:
-        json.dump(report, f, indent=2, ensure_ascii=False)
-    
+    try:
+        with open(report_file, "w") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+    except Exception:
+        logger.exception("Failed to save enrollment_report.json")
+
     return report
 
 
@@ -267,20 +191,20 @@ def format_comparison_telegram(report):
         return (
             "📊 *Enrollment Comparison*\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "ℹ️ Gmail auto-check is not available in this environment.\n"
-            "(`manus-mcp-cli` not installed — this only works inside the Manus sandbox.)\n\n"
-            "Please verify enrollments manually or deploy with Gmail API integration."
+            "ℹ️ Gmail auto-check is not available right now.\n"
+            "Set `GMAIL_USER` and `GMAIL_APP_PASSWORD` in Railway to enable.\n\n"
+            "Please verify enrollments manually for now."
         )
 
     msg = "📊 *Enrollment Comparison Report*\n"
     msg += f"🕐 {report['checked_at'][:16]} PHT\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
-    
+
     msg += f"💰 Xendit Payments: {report['total_payments']}\n"
     msg += f"✅ Systeme.io Enrollments: {report['total_enrolments']}\n"
     msg += f"🟢 Matched: {report['matched']}\n"
     msg += f"🔴 Unmatched: {report['unmatched']}\n\n"
-    
+
     if report["unmatched_students"]:
         msg += "⚠️ *UNMATCHED - Paid but NOT Enrolled:*\n\n"
         for i, s in enumerate(report["unmatched_students"], 1):
@@ -292,30 +216,30 @@ def format_comparison_telegram(report):
     else:
         msg += "✅ *All payments matched with enrollments!*\n"
         msg += "Walang student na nag-bayad pero hindi naka-enroll. 🎉\n"
-    
+
     if report["matched_students"]:
         msg += "\n🟢 *Matched Students:*\n"
         for s in report["matched_students"]:
             msg += f"  ✅ {s['email']} - {s['course']}\n"
-    
+
     return msg
 
 
 def format_comparison_markdown(report):
     """Format the comparison report for markdown."""
     md = "### Enrollment Comparison\n\n"
-    md += f"| Metric | Count |\n"
-    md += f"|--------|-------|\n"
+    md += "| Metric | Count |\n"
+    md += "|--------|-------|\n"
     md += f"| Xendit Payments | {report['total_payments']} |\n"
     md += f"| Systeme.io Enrollments | {report['total_enrolments']} |\n"
     md += f"| Matched | {report['matched']} |\n"
     md += f"| Unmatched | {report['unmatched']} |\n\n"
-    
+
     if report["unmatched_students"]:
         md += "#### Unmatched Students (Paid but NOT Enrolled)\n\n"
         md += "| Email | Course | Amount |\n"
         md += "|-------|--------|--------|\n"
         for s in report["unmatched_students"]:
             md += f"| {s['email']} | {s['course']} | {s['amount']} |\n"
-    
+
     return md
