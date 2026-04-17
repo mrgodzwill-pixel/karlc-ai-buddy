@@ -13,7 +13,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 import gmail_imap
-from config import DATA_DIR, OWNER_EMAIL
+from config import DATA_DIR, OWNER_EMAIL, SYSTEME_SENDER
 
 PHT = timezone(timedelta(hours=8))
 logger = logging.getLogger(__name__)
@@ -72,15 +72,28 @@ def _extract_amount(text):
     return "N/A"
 
 
+_SYSTEM_EMAIL_DOMAINS = {"xendit.co", "systeme.io", "karlcomboy.com"}
+
+
 def _extract_enrolment_email(text):
-    """Extract student email from New Enrolment email body."""
+    """Extract the first plausible student email from a Systeme.io email body.
+
+    Filters out Xendit/Systeme/Karl's own domains so auto-generated footer
+    links and sender addresses don't get picked up as the student."""
     emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
-    # Filter out known system / owner emails so the student email remains.
-    system_emails = {"noreply@xendit.co", "noreply@systeme.io"}
+    excluded_emails = {SYSTEME_SENDER}
     if OWNER_EMAIL:
-        system_emails.add(OWNER_EMAIL)
-    student_emails = [e.lower() for e in emails if e.lower() not in system_emails]
-    return student_emails[0] if student_emails else None
+        excluded_emails.add(OWNER_EMAIL)
+
+    for raw in emails:
+        e = raw.lower()
+        if e in excluded_emails:
+            continue
+        domain = e.rsplit("@", 1)[-1]
+        if domain in _SYSTEM_EMAIL_DOMAINS:
+            continue
+        return e
+    return None
 
 
 def _unavailable_report():
@@ -134,27 +147,27 @@ def compare_payments_vs_enrolments(days_back=7):
 
     print(f"[Enrollment] Found {len(payments)} Xendit invoices (with payer emails)")
 
-    # Search enrollment confirmation emails.
-    # If OWNER_EMAIL is set, scope the search to it; otherwise search any sender.
-    sender_filter = f"from:{OWNER_EMAIL} " if OWNER_EMAIL else ""
+    # Search enrollment / verification emails from Systeme.io.
+    # Default sender is course@karlcomboy.com (configurable via SYSTEME_SENDER).
     enrolment_msgs = gmail_imap.search(
-        f"{sender_filter}New Enrolment newer_than:{days_back}d",
-        limit=30,
+        f"from:{SYSTEME_SENDER} newer_than:{days_back}d",
+        limit=50,
     )
     if enrolment_msgs is None:
         enrolment_msgs = []
 
     enrolments = []
+    seen_emails = set()
     for m in enrolment_msgs:
-        subject_lower = m.get("subject", "").lower()
-        if "enrol" not in subject_lower and "new" not in subject_lower:
-            continue
         student_email = _extract_enrolment_email(m.get("body", ""))
-        if student_email:
-            enrolments.append({
-                "email": student_email,
-                "date": m.get("date", ""),
-            })
+        if not student_email or student_email in seen_emails:
+            continue
+        seen_emails.add(student_email)
+        enrolments.append({
+            "email": student_email,
+            "date": m.get("date", ""),
+            "subject": m.get("subject", ""),
+        })
 
     print(f"[Enrollment] Found {len(enrolments)} enrolment confirmations")
 

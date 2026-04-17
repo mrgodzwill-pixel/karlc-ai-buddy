@@ -33,6 +33,12 @@ def get_gemini_url(model=None):
 # === Owner / operator email (used to filter system emails out of enrollment scans) ===
 OWNER_EMAIL = os.environ.get("OWNER_EMAIL", "").lower()
 
+# === Systeme.io sender address ===
+# This is the "From:" address Systeme uses when sending enrollment / verification
+# emails. The enrollment checker searches messages from this sender and extracts
+# the student's email from the body, then matches against Xendit payer emails.
+SYSTEME_SENDER = os.environ.get("SYSTEME_SENDER", "course@karlcomboy.com").lower()
+
 # === Gmail IMAP Config (for enrollment checker & Xendit lookups) ===
 # See gmail_imap.py. Enable by setting GMAIL_USER and GMAIL_APP_PASSWORD
 # (a 16-character Google App Password, NOT your regular account password).
