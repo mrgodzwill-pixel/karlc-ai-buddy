@@ -297,7 +297,8 @@ def send_help():
     msg += "📅 *Auto Reports:*\n"
     msg += "  • 7AM - Full report + Enrollment check\n"
     msg += "  • 7PM - Full report\n"
-    msg += "\n💬 *Or just chat with me naturally!*"
+    msg += "\n💬 *Or just chat with me naturally!*\n"
+    msg += "Try: `May payment ba si Juan Dela Cruz?`, `Check payment for juan@example.com`, or `Hanapin mo yung payment ng 09171234567`"
 
     send_message(msg)
 

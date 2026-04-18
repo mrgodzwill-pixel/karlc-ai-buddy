@@ -8,6 +8,7 @@ A 24/7 AI-powered personal assistant for managing the "Karl C" Facebook Page, co
 - **Comment Monitoring**: Compiles comments and suggests keyword-based replies
 - **Student Ticket System**: Tracks enrollment issues with pending/done states
 - **Enrollment Checker**: Compares Xendit payments vs Systeme.io enrollments (requires Gmail IMAP)
+- **Local Xendit Store**: Persists parsed Xendit payer name/email/phone/payment details to JSON for reuse
 - **SMS Follow-ups**: Sends manual unresolved-ticket follow-ups via Semaphore
 - **Support Inbox Watcher**: Monitors emails sent to the support mailbox and alerts Karl in Telegram
 - **Telegram Bot**: Full command interface + natural language Gemini AI chat
@@ -33,6 +34,7 @@ Scheduler (PHT)   → 7AM/7PM     → Report Generator → Telegram
 ## ⚠️ Important: data persistence
 
 State (tickets, conversations, stored DMs, replied-comment IDs) lives in JSON files under `DATA_DIR`.
+That now includes the local `xendit_payments.json` store used for payment lookups and manual verification.
 
 On **Railway**, **Render**, and default **Docker**, the filesystem is ephemeral — every redeploy wipes state. To keep data across deploys you **must** mount a persistent volume at `DATA_DIR`:
 
@@ -92,6 +94,12 @@ Optional for SMS follow-ups:
 | `/approve_all` | Approve all suggested replies |
 | `/status` | Check agent status |
 | Or just chat naturally! | AI-powered conversation |
+
+Natural-language payment lookups are supported in Telegram chat, for example:
+
+- `May payment ba si Juan Dela Cruz?`
+- `Check payment for juan@example.com`
+- `Hanapin mo yung payment ng 09171234567`
 
 ## Known limitations
 

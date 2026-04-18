@@ -20,6 +20,7 @@ from config import (
     DATA_DIR, KEYWORD_REPLIES
 )
 from storage import file_lock, load_json, save_json
+from xendit_payments import find_payment_by_email, sync_payment_records
 
 PHT = timezone(timedelta(hours=8))
 CONVERSATIONS_FILE = os.path.join(DATA_DIR, "dm_conversations.json")
@@ -175,23 +176,56 @@ def search_xendit_payment(email):
     The "unavailable" flag lets callers tell the student "I couldn't auto-check,
     Karl will verify manually" instead of incorrectly saying "no payment found".
     """
+    stored_match = find_payment_by_email(email)
+    if stored_match:
+        return {
+            "found": True,
+            "email": email,
+            "subject": stored_match.get("subject", ""),
+            "date": stored_match.get("date", ""),
+            "course": stored_match.get("course", ""),
+            "amount": stored_match.get("amount", ""),
+            "payer_name": stored_match.get("payer_name", ""),
+            "phone": stored_match.get("phone", "") or stored_match.get("phone_normalized", ""),
+            "source": "local_store",
+        }
+
     if not gmail_imap.available():
         print("[AI Buddy] GMAIL_USER/GMAIL_APP_PASSWORD not set - skipping Gmail search")
         return {"found": False, "email": email, "unavailable": True}
 
-    messages = gmail_imap.search(f"from:noreply@xendit.co {email}", limit=5)
+    messages = gmail_imap.search(f"from:notifications@xendit.co {email}", limit=5)
     if messages is None:
         return {"found": False, "email": email, "unavailable": True}
 
-    for msg in messages:
-        subject = msg.get("subject", "")
-        if "INVOICE PAID" in subject.upper():
+    _, parsed_records = sync_payment_records(messages)
+    for record in parsed_records:
+        if record.get("email", "").lower() == str(email or "").lower():
             return {
                 "found": True,
                 "email": email,
-                "subject": subject,
-                "date": msg.get("date", ""),
+                "subject": record.get("subject", ""),
+                "date": record.get("date", ""),
+                "course": record.get("course", ""),
+                "amount": record.get("amount", ""),
+                "payer_name": record.get("payer_name", ""),
+                "phone": record.get("phone", "") or record.get("phone_normalized", ""),
+                "source": "gmail_imap",
             }
+
+    stored_match = find_payment_by_email(email)
+    if stored_match:
+        return {
+            "found": True,
+            "email": email,
+            "subject": stored_match.get("subject", ""),
+            "date": stored_match.get("date", ""),
+            "course": stored_match.get("course", ""),
+            "amount": stored_match.get("amount", ""),
+            "payer_name": stored_match.get("payer_name", ""),
+            "phone": stored_match.get("phone", "") or stored_match.get("phone_normalized", ""),
+            "source": "local_store",
+        }
 
     return {"found": False, "email": email, "unavailable": False}
 
@@ -328,7 +362,8 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
 
         if payment and payment.get("found"):
             # Payment found!
-            course_info = payment.get("subject", "Course")
+            course_info = payment.get("course") or payment.get("subject", "Course")
+            amount_info = payment.get("amount", "See invoice")
             
             send_fb_message(
                 sender_id,
@@ -342,7 +377,7 @@ def handle_incoming_dm(sender_id, message_text, sender_name=None):
                 student_name=sender_name,
                 student_email=email,
                 course_title=course_info,
-                price="See invoice",
+                price=amount_info,
                 fb_sender_id=sender_id,
             )
 

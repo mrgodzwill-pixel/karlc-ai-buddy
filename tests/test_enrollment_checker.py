@@ -1,8 +1,11 @@
+import json
+import os
 import tempfile
 import unittest
 from unittest.mock import patch
 
 import enrollment_checker
+import xendit_payments
 
 
 class EnrollmentCheckerTests(unittest.TestCase):
@@ -110,6 +113,51 @@ class EnrollmentCheckerTests(unittest.TestCase):
         self.assertEqual(report["total_payments"], 1)
         self.assertEqual(report["payments"][0]["email"], "payer@example.com")
         self.assertEqual(report["payments"][0]["course"], "MikroTik Basic (QuickStart)")
+
+    def test_compare_payments_persists_local_xendit_store(self):
+        messages = {
+            f"from:{enrollment_checker.XENDIT_SENDER} newer_than:7d": [],
+            f'from:{enrollment_checker.XENDIT_SENDER} subject:"INVOICE PAID" newer_than:7d': [
+                {
+                    "subject": "INVOICE PAID: karlcw-quickstart-799-123",
+                    "from": "notifications@xendit.co",
+                    "date": "Sat, 18 Apr 2026 07:30:00 +0800",
+                    "body": (
+                        "Payer Name: Juan Dela Cruz\n"
+                        "Payer Email: payer@example.com\n"
+                        "Mobile Number: 0917-123-4567\n"
+                        "Payment Method: GCash\n"
+                        "Total: PHP 799"
+                    ),
+                }
+            ],
+            f'from:{enrollment_checker.XENDIT_SENDER} subject:"Successful Payment" newer_than:7d': [],
+            f'from:{enrollment_checker.XENDIT_SENDER} subject:"Payment received" newer_than:7d': [],
+            f'from:{enrollment_checker.XENDIT_SENDER} subject:"Payment completed" newer_than:7d': [],
+            f'from:{enrollment_checker.XENDIT_SENDER} subject:"Pembayaran Berhasil" newer_than:7d': [],
+            f"from:{enrollment_checker.SYSTEME_SENDER} newer_than:7d": [],
+        }
+
+        def fake_search(query, limit=20):
+            return messages.get(query, [])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payments_file = os.path.join(tmpdir, "xendit_payments.json")
+            with patch.object(enrollment_checker, "DATA_DIR", tmpdir):
+                with patch.object(xendit_payments, "XENDIT_PAYMENTS_FILE", payments_file):
+                    with patch("enrollment_checker.gmail_imap.available", return_value=True):
+                        with patch("enrollment_checker.gmail_imap.search", side_effect=fake_search):
+                            report = enrollment_checker.compare_payments_vs_enrolments(days_back=7)
+
+            with open(payments_file) as f:
+                payment_store = json.load(f)
+
+        self.assertEqual(report["payments"][0]["payer_name"], "Juan Dela Cruz")
+        self.assertEqual(report["payments"][0]["phone"], "0917-123-4567")
+        self.assertEqual(report["payments"][0]["payment_method"], "GCash")
+        self.assertEqual(payment_store["payments"][0]["payer_name"], "Juan Dela Cruz")
+        self.assertEqual(payment_store["payments"][0]["email"], "payer@example.com")
+        self.assertEqual(payment_store["payments"][0]["phone_normalized"], "639171234567")
 
 
 if __name__ == "__main__":

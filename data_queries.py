@@ -12,6 +12,11 @@ from email.utils import parsedate_to_datetime
 from config import (
     PAGE_ID, PAGE_ACCESS_TOKEN, BASE_URL, DATA_DIR, GMAIL_ENABLED
 )
+from xendit_payments import (
+    extract_lookup_criteria,
+    format_payment_lookup_summary,
+    load_payment_store,
+)
 
 PHT = timezone(timedelta(hours=8))
 
@@ -42,6 +47,35 @@ def _filter_recent_entries(entries, cutoff):
         if ts and ts >= cutoff:
             recent.append(entry)
     return recent
+
+
+def _payment_store_summary(payment_store, hours_back):
+    checked_at = _parse_timestamp(payment_store.get("checked_at", ""))
+    if not payment_store.get("payments") or not checked_at:
+        return None
+
+    cutoff = datetime.now(PHT) - timedelta(hours=hours_back)
+    payments = _filter_recent_entries(payment_store.get("payments", []), cutoff)
+    summary_lines = [
+        f"📧 Recent Xendit Payment Activity (store synced: {checked_at.strftime('%Y-%m-%d %H:%M')} PHT)",
+        f"• Stored Xendit payments in last {hours_back} hour(s): {len(payments)}",
+    ]
+    for payment in payments[:5]:
+        payer = payment.get("payer_name") or payment.get("email") or "Unknown payer"
+        summary_lines.append(
+            f"  • {payer} - {payment.get('course', 'N/A')} "
+            f"({payment.get('amount', 'N/A')})"
+        )
+    if not payments:
+        summary_lines.append(
+            f"No stored Xendit payments matched the last {hours_back} hour(s)."
+        )
+
+    return {
+        "count": len(payments),
+        "summary": "\n".join(summary_lines),
+        "checked_at": checked_at,
+    }
 
 
 # ============================================================
@@ -166,9 +200,17 @@ def get_recent_comments(hours_back=1):
 # ============================================================
 
 def get_recent_emails(hours_back=1):
-    """Get recent emails - checks stored enrollment report or runs Gmail search."""
+    """Get recent email/payment activity from stored reports."""
+    payment_store = load_payment_store()
+    store_summary = _payment_store_summary(payment_store, hours_back)
     report_file = os.path.join(DATA_DIR, "enrollment_report.json")
     if not os.path.exists(report_file):
+        if store_summary:
+            return {
+                "count": store_summary["count"],
+                "summary": store_summary["summary"],
+            }
+
         return {
             "count": 0,
             "summary": "No email report available yet. Use /enrollment to run a check, or wait for the next 7AM scheduled report."
@@ -179,6 +221,11 @@ def get_recent_emails(hours_back=1):
 
     checked_at = _parse_timestamp(report.get("checked_at", ""))
     if not checked_at:
+        if store_summary:
+            return {
+                "count": store_summary["count"],
+                "summary": store_summary["summary"],
+            }
         return {
             "count": 0,
             "summary": "Stored email report has no valid timestamp. Use /enrollment to refresh it before asking for recent email activity."
@@ -186,6 +233,15 @@ def get_recent_emails(hours_back=1):
 
     cutoff = datetime.now(PHT) - timedelta(hours=hours_back)
     if checked_at < cutoff:
+        if store_summary and store_summary["checked_at"] >= cutoff:
+            return {
+                "count": store_summary["count"],
+                "summary": (
+                    f"{store_summary['summary']}\n"
+                    "Enrollment comparison data is older than this time window, "
+                    "so only the stored Xendit payment index is current."
+                ),
+            }
         return {
             "count": 0,
             "summary": (
@@ -220,6 +276,11 @@ def get_recent_emails(hours_back=1):
         "count": len(payments) + len(enrolments),
         "summary": "\n".join(summary_lines)
     }
+
+
+def get_payment_lookup(user_message, limit=5):
+    """Search stored Xendit payments for a specific payer lookup."""
+    return format_payment_lookup_summary(user_message, limit=limit)
 
 
 # ============================================================
@@ -294,6 +355,18 @@ def build_data_context(user_message):
         asking_messages = True
         asking_comments = True
 
+    payment_lookup_criteria = extract_lookup_criteria(user_message) if asking_emails else {
+        "emails": [],
+        "phones": [],
+        "names": [],
+        "tokens": [],
+    }
+    asking_specific_payment_lookup = asking_emails and any([
+        payment_lookup_criteria.get("emails"),
+        payment_lookup_criteria.get("phones"),
+        payment_lookup_criteria.get("names"),
+    ])
+
     # Fetch requested data
     if asking_messages or asking_general:
         dm_data = get_recent_dms(hours)
@@ -306,6 +379,10 @@ def build_data_context(user_message):
     if asking_emails or asking_general:
         email_data = get_recent_emails(hours)
         context_parts.append(f"\n[EMAIL/PAYMENT DATA]\n{email_data['summary']}")
+
+    if asking_specific_payment_lookup:
+        payment_lookup = get_payment_lookup(user_message)
+        context_parts.append(f"\n[PAYMENT LOOKUP]\n{payment_lookup['summary']}")
 
     if asking_vpn:
         context_parts.append(

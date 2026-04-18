@@ -6,7 +6,6 @@ Gmail access is via IMAP + a Gmail App Password (see gmail_imap.py).
 On Railway/Render set GMAIL_USER and GMAIL_APP_PASSWORD to enable.
 """
 
-import json
 import logging
 import os
 import re
@@ -15,6 +14,15 @@ from html import unescape
 
 import gmail_imap
 from config import DATA_DIR, OWNER_EMAIL, SYSTEME_SENDER
+from storage import save_json
+from xendit_payments import (
+    extract_amount as _extract_amount,
+    extract_course_from_subject as _extract_course_from_subject,
+    extract_payer_email as _extract_payer_email,
+    extract_payment_record,
+    subject_looks_paid as _xendit_subject_looks_paid,
+    sync_payment_records,
+)
 
 PHT = timezone(timedelta(hours=8))
 logger = logging.getLogger(__name__)
@@ -28,15 +36,6 @@ _SYSTEM_EMAIL_DOMAINS = {
     "karlcomboy.com",
 }
 _XENDIT_SEARCH_LIMIT = 200
-_XENDIT_SUCCESS_SUBJECT_KEYWORDS = (
-    "INVOICE PAID",
-    "SUCCESSFUL PAYMENT",
-    "PAYMENT RECEIVED",
-    "PAYMENT COMPLETED",
-    "PEMBAYARAN BERHASIL",
-    "PEMBAYARAN SUKSES",
-    "PAID",
-)
 _XENDIT_QUERY_TEMPLATES = (
     f"from:{XENDIT_SENDER} newer_than:{{days_back}}d",
     f'from:{XENDIT_SENDER} subject:"INVOICE PAID" newer_than:{{days_back}}d',
@@ -74,67 +73,6 @@ def _normalise_email_body(text):
     return text.strip()
 
 
-def _extract_payer_email(text):
-    """Extract payer email from Xendit invoice email body.
-
-    Trust only the explicit `Payer Email` field to avoid false matches from
-    other addresses that may appear elsewhere in the email body."""
-    text = _normalise_email_body(text)
-    match = re.search(
-        r'Payer Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
-        text or "",
-        re.IGNORECASE,
-    )
-    if not match:
-        return None
-
-    email_addr = match.group(1).lower()
-    if _is_system_email(email_addr):
-        return None
-
-    return email_addr
-
-
-def _extract_course_from_subject(subject):
-    """Extract course name from Xendit invoice subject.
-
-    Subject format: "INVOICE PAID: karlcw-course-name-price-id"
-    """
-    subject_lower = subject.lower()
-
-    course_map = {
-        "quickstart": "MikroTik Basic (QuickStart)",
-        "dual-isp": "MikroTik Dual-ISP",
-        "hybrid-access": "MikroTik Hybrid",
-        "traffic-control": "MikroTik Traffic Control",
-        "core10g": "MikroTik 10G Core Part 1",
-        "ospf": "MikroTik 10G Core Part 2 (OSPF)",
-        "ftth": "Hybrid FTTH (PLC + FBT)",
-        "solar": "DIY Hybrid Solar",
-        "bundle": "Course Bundle",
-    }
-
-    for key, name in course_map.items():
-        if key in subject_lower:
-            return name
-
-    return subject.split(":")[-1].strip() if ":" in subject else subject
-
-
-def _extract_amount(text):
-    """Extract payment amount from email body."""
-    patterns = [
-        r'(?:PHP|₱)\s*([\d,]+(?:\.\d{2})?)',
-        r'Amount[:\s]*(?:PHP|₱)?\s*([\d,]+(?:\.\d{2})?)',
-        r'Total[:\s]*(?:PHP|₱)?\s*([\d,]+(?:\.\d{2})?)',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return f"PHP {match.group(1)}"
-    return "N/A"
-
-
 def _extract_enrolment_email(text):
     """Extract the Systeme student email from the explicit `Email` field only."""
     text = _normalise_email_body(text)
@@ -166,11 +104,6 @@ def _unavailable_report():
         "unavailable": True,
         "checked_at": datetime.now(PHT).isoformat(),
     }
-
-
-def _xendit_subject_looks_paid(subject):
-    subject_upper = (subject or "").upper()
-    return any(keyword in subject_upper for keyword in _XENDIT_SUCCESS_SUBJECT_KEYWORDS)
 
 
 def _search_xendit_messages(days_back=7):
@@ -225,7 +158,10 @@ def compare_payments_vs_enrolments(days_back=7):
         # IMAP configured but connect failed; treat as unavailable.
         return _unavailable_report()
 
+    checked_at = datetime.now(PHT).isoformat()
     print(f"[Enrollment] Xendit combined search returned {len(xendit_msgs)} unique messages")
+
+    _, parsed_xendit_records = sync_payment_records(xendit_msgs, checked_at=checked_at)
 
     payments = []
     skipped_subjects = []
@@ -236,8 +172,8 @@ def compare_payments_vs_enrolments(days_back=7):
             if len(skipped_subjects) < 5:
                 skipped_subjects.append(subject[:80] or "(no subject)")
             continue
-        body = m.get("body", "")
-        payer_email = _extract_payer_email(body)
+        record = extract_payment_record(m)
+        payer_email = (record or {}).get("email")
         if not payer_email:
             # Log once so Karl can see in Railway logs which subjects were
             # matched but failed body extraction (helps tune regex if needed).
@@ -246,14 +182,20 @@ def compare_payments_vs_enrolments(days_back=7):
                 missing_email_subjects.append(subject[:80] or "(no subject)")
             continue
         payments.append({
+            "payer_name": record.get("payer_name", ""),
             "email": payer_email,
-            "course": _extract_course_from_subject(subject),
-            "amount": _extract_amount(body),
+            "phone": record.get("phone", ""),
+            "course": record.get("course") or _extract_course_from_subject(subject),
+            "amount": record.get("amount") or _extract_amount(m.get("body", "")),
+            "payment_method": record.get("payment_method", ""),
             "subject": subject,
             "date": m.get("date", ""),
         })
 
-    print(f"[Enrollment] Found {len(payments)} Xendit invoices (with payer emails)")
+    print(
+        f"[Enrollment] Parsed {len(parsed_xendit_records)} paid Xendit records; "
+        f"{len(payments)} include payer emails for enrollment matching"
+    )
     if not payments:
         if skipped_subjects:
             print(f"[Enrollment] Sample non-payment Xendit subjects: {skipped_subjects}")
@@ -298,13 +240,12 @@ def compare_payments_vs_enrolments(days_back=7):
         "unmatched_students": unmatched,
         "payments": payments,
         "enrolments": enrolments,
-        "checked_at": datetime.now(PHT).isoformat(),
+        "checked_at": checked_at,
     }
 
     report_file = os.path.join(DATA_DIR, "enrollment_report.json")
     try:
-        with open(report_file, "w") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
+        save_json(report_file, report)
     except Exception:
         logger.exception("Failed to save enrollment_report.json")
 
