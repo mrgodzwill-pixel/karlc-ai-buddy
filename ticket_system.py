@@ -11,6 +11,7 @@ from storage import file_lock, load_json, save_json
 
 PHT = timezone(timedelta(hours=8))
 TICKETS_FILE = os.path.join(DATA_DIR, "tickets.json")
+ENROLLMENT_RESOLUTIONS_FILE = os.path.join(DATA_DIR, "resolved_enrollment_overrides.json")
 
 
 def _load_tickets():
@@ -19,6 +20,107 @@ def _load_tickets():
 
 def _save_tickets(tickets):
     save_json(TICKETS_FILE, tickets)
+
+
+def _load_enrollment_resolutions():
+    return load_json(ENROLLMENT_RESOLUTIONS_FILE, [])
+
+
+def _save_enrollment_resolutions(resolutions):
+    save_json(ENROLLMENT_RESOLUTIONS_FILE, resolutions)
+
+
+def _normalise_enrollment_key(student_email="", course_title="", price="", date_paid=""):
+    return (
+        str(student_email or "").strip().lower(),
+        str(course_title or "").strip().lower(),
+        str(price or "").strip().lower(),
+        str(date_paid or "").strip().lower(),
+    )
+
+
+def _ticket_to_enrollment_key(ticket):
+    return _normalise_enrollment_key(
+        ticket.get("student_email", ""),
+        ticket.get("course_title", ""),
+        ticket.get("price", ""),
+        ticket.get("date_paid", ""),
+    )
+
+
+def _student_to_enrollment_key(student):
+    return _normalise_enrollment_key(
+        student.get("email", ""),
+        student.get("course", student.get("course_title", "")),
+        student.get("amount", student.get("price", "")),
+        student.get("date_paid", student.get("date", "")),
+    )
+
+
+def add_enrollment_resolution(ticket):
+    """Suppress future unmatched alerts for this exact enrollment record."""
+    if not ticket or ticket.get("type") != "enrollment_incomplete":
+        return None
+
+    resolution = {
+        "student_email": ticket.get("student_email", ""),
+        "course_title": ticket.get("course_title", ""),
+        "price": ticket.get("price", ""),
+        "date_paid": ticket.get("date_paid", ""),
+        "resolved_at": datetime.now(PHT).isoformat(),
+    }
+    resolution_key = _ticket_to_enrollment_key(ticket)
+
+    with file_lock(ENROLLMENT_RESOLUTIONS_FILE):
+        resolutions = _load_enrollment_resolutions()
+        existing_keys = {
+            _normalise_enrollment_key(
+                item.get("student_email", ""),
+                item.get("course_title", ""),
+                item.get("price", ""),
+                item.get("date_paid", ""),
+            )
+            for item in resolutions
+        }
+        if resolution_key in existing_keys:
+            return None
+        resolutions.append(resolution)
+        _save_enrollment_resolutions(resolutions)
+
+    return resolution
+
+
+def filter_resolved_enrollment_students(students):
+    """Remove enrollment rows that were manually resolved earlier."""
+    with file_lock(TICKETS_FILE):
+        tickets = _load_tickets()
+    with file_lock(ENROLLMENT_RESOLUTIONS_FILE):
+        resolutions = _load_enrollment_resolutions()
+
+    resolution_keys = {
+        _normalise_enrollment_key(
+            item.get("student_email", ""),
+            item.get("course_title", ""),
+            item.get("price", ""),
+            item.get("date_paid", ""),
+        )
+        for item in resolutions
+    }
+    resolution_keys.update(
+        _ticket_to_enrollment_key(ticket)
+        for ticket in tickets
+        if ticket.get("type") == "enrollment_incomplete" and ticket.get("status") == "done"
+    )
+
+    active = []
+    suppressed = []
+    for student in students:
+        if _student_to_enrollment_key(student) in resolution_keys:
+            suppressed.append(student)
+        else:
+            active.append(student)
+
+    return active, suppressed
 
 
 def create_ticket(ticket_type, student_name, student_email, course_title="", price="",
@@ -106,6 +208,7 @@ def resolve_ticket(ticket_id):
                 t["status"] = "done"
                 t["resolved_at"] = datetime.now(PHT).isoformat()
                 _save_tickets(tickets)
+                add_enrollment_resolution(t)
                 return t, "resolved"
         return None, "not_found"
 

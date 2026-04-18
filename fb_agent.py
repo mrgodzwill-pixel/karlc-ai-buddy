@@ -17,7 +17,13 @@ from config import (
 )
 from storage import file_lock, load_json, save_json
 from telegram_bot import send_report, send_suggested_replies_summary, send_message
-from ticket_system import get_pending_tickets, get_ticket_stats, format_pending_tickets_report, create_enrollment_ticket
+from ticket_system import (
+    get_pending_tickets,
+    get_ticket_stats,
+    format_pending_tickets_report,
+    create_enrollment_ticket,
+    filter_resolved_enrollment_students,
+)
 from enrollment_checker import compare_payments_vs_enrolments, format_comparison_telegram
 
 PHT = timezone(timedelta(hours=8))
@@ -339,6 +345,13 @@ def run_enrollment_check(notify_if_new_tickets=False):
     
     try:
         report = compare_payments_vs_enrolments(days_back=7)
+        active_unmatched, suppressed_unmatched = filter_resolved_enrollment_students(
+            report.get("unmatched_students", [])
+        )
+        report["suppressed_unmatched_students"] = suppressed_unmatched
+        report["suppressed"] = len(suppressed_unmatched)
+        report["unmatched_students"] = active_unmatched
+        report["unmatched"] = len(active_unmatched)
         
         new_tickets = 0
         for student in report.get("unmatched_students", []):
@@ -355,6 +368,8 @@ def run_enrollment_check(notify_if_new_tickets=False):
         
         print(f"[Enrollment] Payments: {report['total_payments']}, Enrollments: {report['total_enrolments']}")
         print(f"[Enrollment] Matched: {report['matched']}, Unmatched: {report['unmatched']}")
+        if report.get("suppressed"):
+            print(f"[Enrollment] Suppressed (manually resolved): {report['suppressed']}")
         if new_tickets:
             print(f"[Enrollment] Created {new_tickets} new enrollment tickets")
 

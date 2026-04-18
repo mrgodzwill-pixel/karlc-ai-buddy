@@ -330,6 +330,8 @@ def format_comparison_telegram(report):
     msg += f"✅ Systeme.io Enrollments: {report['total_enrolments']}\n"
     msg += f"🟢 Matched: {report['matched']}\n"
     msg += f"🔴 Unmatched: {report['unmatched']}\n\n"
+    if report.get("suppressed"):
+        msg += f"🟡 Manually Resolved / Suppressed: {report['suppressed']}\n\n"
 
     if report["unmatched_students"]:
         msg += "⚠️ *UNMATCHED - Paid but NOT Enrolled:*\n\n"
@@ -339,6 +341,9 @@ def format_comparison_telegram(report):
             msg += f"   📚 {s['course']}\n"
             msg += f"   💰 {s['amount']}\n\n"
         msg += "⚡ These students need manual enrollment verification!\n"
+    elif report.get("suppressed"):
+        msg += "✅ *No active unmatched students right now.*\n"
+        msg += "Previously resolved manual-enrollment cases are being suppressed from alerts.\n"
     else:
         msg += "✅ *All payments matched with enrollments!*\n"
         msg += "Walang student na nag-bayad pero hindi naka-enroll. 🎉\n"
