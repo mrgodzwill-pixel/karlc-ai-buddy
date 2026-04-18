@@ -50,12 +50,12 @@ def build_followup_message(ticket, contact_name):
         return (
             f"Hi {first_name}, Karl C here. Nareceive namin payment mo for {course_label}, "
             "pero invalid or incomplete ang email na nagamit sa enrollment. "
-            "Reply ka lang with your correct email para ma-activate namin. Salamat!"
+            "Please email us at course@karlcomboy.com with your correct email para ma-activate namin. Salamat!"
         )
 
     return (
         f"Hi {first_name}, Karl C here. May kailangan lang kaming i-confirm sa student concern mo. "
-        "Reply ka lang dito with your correct email and any helpful details. Salamat!"
+        "Please email us at course@karlcomboy.com with your correct email and helpful details. Salamat!"
     )
 
 
