@@ -212,6 +212,66 @@ class EnrollmentCheckerTests(unittest.TestCase):
         self.assertEqual(report["matched"], 1)
         self.assertEqual(report["payments"][0]["email"], "student@example.com")
 
+    def test_compare_payments_can_match_enrolments_found_via_to_query(self):
+        messages = {
+            f"from:{enrollment_checker.SYSTEME_SENDER} newer_than:7d": [],
+            f"to:{enrollment_checker.SYSTEME_SENDER} newer_than:7d": [
+                {
+                    "subject": "Enrollment confirmation",
+                    "from": "mailer@systeme.io",
+                    "date": "Sat, 18 Apr 2026 09:00:00 +0800",
+                    "body": "Email: student@example.com",
+                }
+            ],
+            f'"{enrollment_checker.SYSTEME_SENDER}" newer_than:7d': [],
+        }
+
+        def fake_search(query, limit=20):
+            return messages.get(query, [])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payments_file = os.path.join(tmpdir, "xendit_payments.json")
+            with patch.object(enrollment_checker, "DATA_DIR", tmpdir):
+                with patch.object(xendit_payments, "XENDIT_PAYMENTS_FILE", payments_file):
+                    xendit_payments.upsert_payment_records([
+                        {
+                            "status": "paid",
+                            "email": "student@example.com",
+                            "course": "MikroTik Hybrid",
+                            "amount": "PHP 1499",
+                            "source": "xendit_payment_webhook",
+                            "xendit_payment_id": "py-123",
+                            "date": "2026-04-18T01:35:00Z",
+                            "paid_at": "2026-04-18T01:35:00Z",
+                        }
+                    ])
+                    with patch("enrollment_checker.xendit_api.available", return_value=False):
+                        with patch("enrollment_checker.gmail_imap.available", return_value=True):
+                            with patch("enrollment_checker.gmail_imap.search", side_effect=fake_search):
+                                report = enrollment_checker.compare_payments_vs_enrolments(days_back=7)
+
+        self.assertEqual(report["total_enrolments"], 1)
+        self.assertEqual(report["matched"], 1)
+
+    def test_format_comparison_telegram_omits_matched_student_dump(self):
+        report = {
+            "checked_at": "2026-04-18T16:00:00+08:00",
+            "total_payments": 2,
+            "total_enrolments": 2,
+            "matched": 2,
+            "unmatched": 0,
+            "matched_students": [
+                {"email": "juan@example.com", "course": "Course A"},
+                {"email": "maria@example.com", "course": "Course B"},
+            ],
+            "unmatched_students": [],
+        }
+
+        message = enrollment_checker.format_comparison_telegram(report)
+
+        self.assertNotIn("Matched Students", message)
+        self.assertNotIn("juan@example.com", message)
+
 
 if __name__ == "__main__":
     unittest.main()

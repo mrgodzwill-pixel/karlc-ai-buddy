@@ -47,6 +47,11 @@ _XENDIT_QUERY_TEMPLATES = (
     f'from:{XENDIT_SENDER} subject:"Payment completed" newer_than:{{days_back}}d',
     f'from:{XENDIT_SENDER} subject:"Pembayaran Berhasil" newer_than:{{days_back}}d',
 )
+_ENROLMENT_QUERY_TEMPLATES = (
+    f"from:{SYSTEME_SENDER} newer_than:{{days_back}}d",
+    f"to:{SYSTEME_SENDER} newer_than:{{days_back}}d",
+    f'"{SYSTEME_SENDER}" newer_than:{{days_back}}d',
+)
 
 
 def _is_system_email(email_addr):
@@ -161,6 +166,28 @@ def _search_xendit_messages(days_back=7):
     return list(combined.values())
 
 
+def _search_enrolment_messages(days_back=7):
+    """Search for enrollment confirmation emails using a few mailbox-safe queries."""
+    combined = {}
+
+    for template in _ENROLMENT_QUERY_TEMPLATES:
+        query = template.format(days_back=days_back)
+        messages = gmail_imap.search(query, limit=_XENDIT_SEARCH_LIMIT)
+        if messages is None:
+            return None
+
+        print(f"[Enrollment] Systeme query '{query}' returned {len(messages)} messages")
+        for message in messages:
+            key = (
+                message.get("date", ""),
+                message.get("from", ""),
+                message.get("subject", ""),
+            )
+            combined.setdefault(key, message)
+
+    return list(combined.values())
+
+
 def compare_payments_vs_enrolments(days_back=7):
     """Compare Xendit payments with Systeme.io enrollments."""
     print(f"[Enrollment] Comparing last {days_back} days...")
@@ -221,10 +248,7 @@ def compare_payments_vs_enrolments(days_back=7):
 
     # Search enrollment / verification emails from Systeme.io.
     # Default sender is course@karlcomboy.com (configurable via SYSTEME_SENDER).
-    enrolment_msgs = gmail_imap.search(
-        f"from:{SYSTEME_SENDER} newer_than:{days_back}d",
-        limit=_XENDIT_SEARCH_LIMIT,
-    )
+    enrolment_msgs = _search_enrolment_messages(days_back=days_back)
     if enrolment_msgs is None:
         enrolment_msgs = []
 
@@ -305,11 +329,6 @@ def format_comparison_telegram(report):
     else:
         msg += "✅ *All payments matched with enrollments!*\n"
         msg += "Walang student na nag-bayad pero hindi naka-enroll. 🎉\n"
-
-    if report["matched_students"]:
-        msg += "\n🟢 *Matched Students:*\n"
-        for s in report["matched_students"]:
-            msg += f"  ✅ {s['email']} - {s['course']}\n"
 
     return msg
 
