@@ -41,9 +41,9 @@ def _connect():
         # Use "All Mail" (not INBOX) so messages auto-filtered to labels — e.g.
         # a Gmail filter that moves Xendit invoices out of the inbox — are
         # still found. INBOX-only would miss anything with a "skip inbox" rule.
-        typ, _ = mail.select('"[Gmail]/All Mail"', readonly=True)
+        typ, _ = mail.select("[Gmail]/All Mail", readonly=True)
         if typ != "OK":
-            # Fallback for non-English Gmail locales or unusual setups.
+            logger.warning("Could not select [Gmail]/All Mail — falling back to INBOX")
             mail.select("INBOX", readonly=True)
         return mail
     except Exception:
