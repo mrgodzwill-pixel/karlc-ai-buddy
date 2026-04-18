@@ -122,26 +122,34 @@ def sync_support_email_tickets(emails):
         preview = str(email.get("preview", "")).strip()
         message_date = str(email.get("date", "")).strip()
 
-        ticket = create_support_email_ticket(
-            student_name=name,
-            student_email=ticket_key_email,
-            subject=subject,
-            preview=preview,
-            email_date=message_date,
+        ticket = find_matching_ticket(
+            "support_email",
+            ticket_key_email,
+            subject,
+            status="pending",
         )
-        if ticket:
-            created.append(ticket)
-        else:
+        if not ticket:
             ticket = find_matching_ticket(
                 "support_email",
                 ticket_key_email,
                 subject,
-                status="pending",
+                status="done",
             )
+        if not ticket:
+            ticket = create_support_email_ticket(
+                student_name=name,
+                student_email=ticket_key_email,
+                subject=subject,
+                preview=preview,
+                email_date=message_date,
+            )
+            if ticket:
+                created.append(ticket)
 
         updated_email = dict(email)
         if ticket:
             updated_email["ticket_id"] = ticket["id"]
+            updated_email["ticket_status"] = ticket.get("status", "")
         synced.append(updated_email)
 
     return synced, created
@@ -197,7 +205,13 @@ def format_support_emails_telegram(emails, title=None):
         timestamp = _parse_date(email.get("date", "")).strftime("%Y-%m-%d %H:%M")
         msg += f"*Email #{i}*\n"
         if email.get("ticket_id"):
-            msg += f"🎫 Ticket: #{email['ticket_id']}\n"
+            ticket_status = str(email.get("ticket_status", "")).strip().lower()
+            if ticket_status == "done":
+                msg += f"🎫 Ticket: #{email['ticket_id']} (resolved)\n"
+            elif ticket_status:
+                msg += f"🎫 Ticket: #{email['ticket_id']} ({ticket_status})\n"
+            else:
+                msg += f"🎫 Ticket: #{email['ticket_id']}\n"
         msg += f"👤 From: {email.get('from', 'Unknown')[:80]}\n"
         msg += f"📝 Subject: {email.get('subject', '(no subject)')[:80]}\n"
         msg += f"🕐 {timestamp} PHT\n"
@@ -205,5 +219,5 @@ def format_support_emails_telegram(emails, title=None):
             msg += f"💬 {email['preview']}\n"
         msg += "\n"
 
-    msg += "Use `/done <ticket-id>` after you manually resolve the case."
+    msg += "Use `/done <ticket-id>` only for pending cases you have already handled."
     return msg

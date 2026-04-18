@@ -91,6 +91,47 @@ class SupportInboxTests(unittest.TestCase):
         self.assertEqual(first_synced[0]["ticket_id"], second_synced[0]["ticket_id"])
         self.assertEqual(pending_support_tickets[0]["student_email"], "juan@example.com")
 
+    def test_sync_support_email_tickets_reuses_done_ticket_without_recreating(self):
+        email = {
+            "id": "support-1",
+            "from": "Juan Dela Cruz <juan@example.com>",
+            "subject": "Need help with enrollment",
+            "date": "Sat, 18 Apr 2026 10:00:00 +0800",
+            "preview": "My correct email is juan@example.com",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tickets_file = f"{tmpdir}/tickets.json"
+            overrides_file = f"{tmpdir}/resolved_enrollment_overrides.json"
+
+            with patch.object(ticket_system, "TICKETS_FILE", tickets_file), patch.object(
+                ticket_system, "ENROLLMENT_RESOLUTIONS_FILE", overrides_file
+            ):
+                first_synced, created = support_inbox.sync_support_email_tickets([email])
+                ticket_system.resolve_ticket(first_synced[0]["ticket_id"])
+                second_synced, second_created = support_inbox.sync_support_email_tickets([email])
+                pending_support_tickets = ticket_system.get_pending_tickets("support_email")
+
+        self.assertEqual(len(created), 1)
+        self.assertEqual(len(second_created), 0)
+        self.assertEqual(first_synced[0]["ticket_id"], second_synced[0]["ticket_id"])
+        self.assertEqual(second_synced[0]["ticket_status"], "done")
+        self.assertEqual(pending_support_tickets, [])
+
+    def test_format_support_emails_telegram_shows_resolved_status(self):
+        message = support_inbox.format_support_emails_telegram([
+            {
+                "ticket_id": 12,
+                "ticket_status": "done",
+                "from": "Juan Dela Cruz <juan@example.com>",
+                "subject": "Need help with enrollment",
+                "date": "Sat, 18 Apr 2026 10:00:00 +0800",
+                "preview": "My correct email is juan@example.com",
+            }
+        ])
+
+        self.assertIn("Ticket: #12 (resolved)", message)
+
 
 if __name__ == "__main__":
     unittest.main()
