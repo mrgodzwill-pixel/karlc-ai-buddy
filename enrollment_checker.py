@@ -11,6 +11,7 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
+from html import unescape
 
 import gmail_imap
 from config import DATA_DIR, OWNER_EMAIL, SYSTEME_SENDER
@@ -63,11 +64,22 @@ def _is_system_email(email_addr):
     return domain in _SYSTEM_EMAIL_DOMAINS or domain.startswith("xendit.")
 
 
+def _normalise_email_body(text):
+    """Normalise plain text / HTML email bodies for label-based extraction."""
+    text = unescape(text or "")
+    text = re.sub(r'(?i)<br\s*/?>', "\n", text)
+    text = re.sub(r'(?i)</(p|div|tr|td|th|li|table)>', " ", text)
+    text = re.sub(r'<[^>]+>', " ", text)
+    text = re.sub(r'\s+', " ", text)
+    return text.strip()
+
+
 def _extract_payer_email(text):
     """Extract payer email from Xendit invoice email body.
 
     Trust only the explicit `Payer Email` field to avoid false matches from
     other addresses that may appear elsewhere in the email body."""
+    text = _normalise_email_body(text)
     match = re.search(
         r'Payer Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
         text or "",
@@ -125,6 +137,7 @@ def _extract_amount(text):
 
 def _extract_enrolment_email(text):
     """Extract the Systeme student email from the explicit `Email` field only."""
+    text = _normalise_email_body(text)
     match = re.search(
         r'Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
         text or "",

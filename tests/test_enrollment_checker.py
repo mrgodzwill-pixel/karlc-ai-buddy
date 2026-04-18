@@ -28,6 +28,18 @@ class EnrollmentCheckerTests(unittest.TestCase):
             enrollment_checker._extract_payer_email(body),
         )
 
+    def test_extract_payer_email_accepts_html_payer_email_label(self):
+        body = """
+        <table>
+          <tr><td>Payer Email</td><td>student@example.com</td></tr>
+        </table>
+        """
+
+        self.assertEqual(
+            enrollment_checker._extract_payer_email(body),
+            "student@example.com",
+        )
+
     def test_extract_enrolment_email_accepts_email_label(self):
         body = """
         Welcome to the course
@@ -48,6 +60,17 @@ class EnrollmentCheckerTests(unittest.TestCase):
 
         self.assertIsNone(
             enrollment_checker._extract_enrolment_email(body),
+        )
+
+    def test_extract_enrolment_email_accepts_html_email_label(self):
+        body = """
+        <div>Email</div><div>student@example.com</div>
+        <div>Need help? course@karlcomboy.com</div>
+        """
+
+        self.assertEqual(
+            enrollment_checker._extract_enrolment_email(body),
+            "student@example.com",
         )
 
     def test_compare_payments_uses_paid_specific_queries(self):
