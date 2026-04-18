@@ -12,6 +12,8 @@ services:
         sync: false
       - key: FB_APP_SECRET
         sync: false
+      - key: FB_VERIFY_TOKEN
+        sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_CHAT_ID

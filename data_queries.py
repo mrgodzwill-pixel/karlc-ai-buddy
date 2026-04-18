@@ -7,12 +7,41 @@ import json
 import os
 import requests
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 
 from config import (
     PAGE_ID, PAGE_ACCESS_TOKEN, BASE_URL, DATA_DIR, GMAIL_ENABLED
 )
 
 PHT = timezone(timedelta(hours=8))
+
+
+def _parse_timestamp(value):
+    """Parse ISO or RFC2822 timestamps into PHT-aware datetimes."""
+    if not value:
+        return None
+
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            dt = parsedate_to_datetime(value)
+        except Exception:
+            return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=PHT)
+
+    return dt.astimezone(PHT)
+
+
+def _filter_recent_entries(entries, cutoff):
+    recent = []
+    for entry in entries:
+        ts = _parse_timestamp(entry.get("date") or entry.get("date_paid"))
+        if ts and ts >= cutoff:
+            recent.append(entry)
+    return recent
 
 
 # ============================================================
@@ -138,41 +167,58 @@ def get_recent_comments(hours_back=1):
 
 def get_recent_emails(hours_back=1):
     """Get recent emails - checks stored enrollment report or runs Gmail search."""
-    # First check if we have a recent enrollment report
     report_file = os.path.join(DATA_DIR, "enrollment_report.json")
-    if os.path.exists(report_file):
-        with open(report_file) as f:
-            report = json.load(f)
-
-        checked_at = report.get("checked_at", "")
-        payments = report.get("payments", [])
-        enrolments = report.get("enrolments", [])
-        unmatched = report.get("unmatched_students", [])
-
-        summary_lines = [f"📧 Latest Email Report (checked: {checked_at[:16]}):\n"]
-        summary_lines.append(f"• Xendit Payments found: {len(payments)}")
-        summary_lines.append(f"• Systeme.io Enrollments: {len(enrolments)}")
-        summary_lines.append(f"• Matched: {report.get('matched', 0)}")
-        summary_lines.append(f"• Unmatched (needs attention): {report.get('unmatched', 0)}")
-
-        if unmatched:
-            summary_lines.append("\n⚠️ Unmatched students (paid but not enrolled):")
-            for s in unmatched[:5]:
-                summary_lines.append(f"  • {s.get('email', 'N/A')} - {s.get('course', 'N/A')} ({s.get('amount', 'N/A')})")
-
-        if payments:
-            summary_lines.append("\n💰 Recent payments:")
-            for p in payments[:5]:
-                summary_lines.append(f"  • {p.get('email', 'N/A')} - {p.get('course', 'N/A')} ({p.get('amount', 'N/A')})")
-
+    if not os.path.exists(report_file):
         return {
-            "count": len(payments) + len(enrolments),
-            "summary": "\n".join(summary_lines)
+            "count": 0,
+            "summary": "No email report available yet. Use /enrollment to run a check, or wait for the next 7AM scheduled report."
         }
 
+    with open(report_file) as f:
+        report = json.load(f)
+
+    checked_at = _parse_timestamp(report.get("checked_at", ""))
+    if not checked_at:
+        return {
+            "count": 0,
+            "summary": "Stored email report has no valid timestamp. Use /enrollment to refresh it before asking for recent email activity."
+        }
+
+    cutoff = datetime.now(PHT) - timedelta(hours=hours_back)
+    if checked_at < cutoff:
+        return {
+            "count": 0,
+            "summary": (
+                f"Latest email report was checked at {checked_at.strftime('%Y-%m-%d %H:%M')} PHT, "
+                f"which is older than the last {hours_back} hour(s). Use /enrollment to refresh it."
+            )
+        }
+
+    payments = _filter_recent_entries(report.get("payments", []), cutoff)
+    enrolments = _filter_recent_entries(report.get("enrolments", []), cutoff)
+    unmatched = _filter_recent_entries(report.get("unmatched_students", []), cutoff)
+
+    summary_lines = [f"📧 Recent Email Activity (report checked: {checked_at.strftime('%Y-%m-%d %H:%M')} PHT)\n"]
+    summary_lines.append(f"• Xendit payment emails in last {hours_back} hour(s): {len(payments)}")
+    summary_lines.append(f"• Systeme.io enrollment emails in last {hours_back} hour(s): {len(enrolments)}")
+    summary_lines.append(f"• Unmatched payment emails in last {hours_back} hour(s): {len(unmatched)}")
+
+    if unmatched:
+        summary_lines.append("\n⚠️ Recent unmatched students (paid but not enrolled):")
+        for s in unmatched[:5]:
+            summary_lines.append(f"  • {s.get('email', 'N/A')} - {s.get('course', 'N/A')} ({s.get('amount', 'N/A')})")
+
+    if payments:
+        summary_lines.append("\n💰 Recent payments:")
+        for p in payments[:5]:
+            summary_lines.append(f"  • {p.get('email', 'N/A')} - {p.get('course', 'N/A')} ({p.get('amount', 'N/A')})")
+
+    if not payments and not enrolments:
+        summary_lines.append(f"\nNo payment or enrollment emails matched the last {hours_back} hour(s).")
+
     return {
-        "count": 0,
-        "summary": "No email report available yet. Use /enrollment to run a check, or wait for the next 7AM scheduled report."
+        "count": len(payments) + len(enrolments),
+        "summary": "\n".join(summary_lines)
     }
 
 

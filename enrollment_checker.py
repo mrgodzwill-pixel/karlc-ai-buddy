@@ -17,18 +17,83 @@ from config import DATA_DIR, OWNER_EMAIL, SYSTEME_SENDER
 
 PHT = timezone(timedelta(hours=8))
 logger = logging.getLogger(__name__)
+_SYSTEM_EMAIL_DOMAINS = {
+    "xendit.co",
+    "xendit.com",
+    "xendit.id",
+    "xendit.ph",
+    "systeme.io",
+    "karlcomboy.com",
+}
+_XENDIT_SEARCH_LIMIT = 200
+_XENDIT_SUCCESS_SUBJECT_KEYWORDS = (
+    "INVOICE PAID",
+    "SUCCESSFUL PAYMENT",
+    "PAYMENT RECEIVED",
+    "PAYMENT COMPLETED",
+    "PEMBAYARAN BERHASIL",
+    "PEMBAYARAN SUKSES",
+    "PAID",
+)
+_XENDIT_QUERY_TEMPLATES = (
+    "from:xendit newer_than:{days_back}d",
+    'subject:"INVOICE PAID" newer_than:{days_back}d',
+    'subject:"Successful Payment" newer_than:{days_back}d',
+    'subject:"Payment received" newer_than:{days_back}d',
+    'subject:"Payment completed" newer_than:{days_back}d',
+    'subject:"Pembayaran Berhasil" newer_than:{days_back}d',
+)
+
+
+def _extract_candidate_emails(text):
+    seen = set()
+    candidates = []
+    for raw in re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text or ""):
+        email_addr = raw.lower()
+        if email_addr in seen:
+            continue
+        seen.add(email_addr)
+        candidates.append(email_addr)
+    return candidates
+
+
+def _is_system_email(email_addr):
+    if not email_addr:
+        return True
+
+    email_addr = email_addr.lower()
+    excluded = {
+        SYSTEME_SENDER,
+        OWNER_EMAIL,
+        os.environ.get("GMAIL_USER", "").lower(),
+    }
+    if email_addr in excluded:
+        return True
+
+    domain = email_addr.rsplit("@", 1)[-1]
+    return domain in _SYSTEM_EMAIL_DOMAINS or domain.startswith("xendit.")
 
 
 def _extract_payer_email(text):
     """Extract payer email from Xendit invoice email body."""
     patterns = [
         r'Payer Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+        r'Customer Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+        r'Buyer Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+        r'Email Pelanggan[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
         r'Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
     ]
     for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+        match = re.search(pattern, text or "", re.IGNORECASE)
         if match:
-            return match.group(1).lower()
+            email_addr = match.group(1).lower()
+            if not _is_system_email(email_addr):
+                return email_addr
+
+    for email_addr in _extract_candidate_emails(text):
+        if not _is_system_email(email_addr):
+            return email_addr
+
     return None
 
 
@@ -72,9 +137,6 @@ def _extract_amount(text):
     return "N/A"
 
 
-_SYSTEM_EMAIL_DOMAINS = {"xendit.co", "systeme.io", "karlcomboy.com"}
-
-
 def _extract_enrolment_email(text):
     """Extract the first plausible student email from a Systeme.io email body.
 
@@ -111,6 +173,50 @@ def _unavailable_report():
     }
 
 
+def _xendit_subject_looks_paid(subject):
+    subject_upper = (subject or "").upper()
+    return any(keyword in subject_upper for keyword in _XENDIT_SUCCESS_SUBJECT_KEYWORDS)
+
+
+def _search_xendit_messages(days_back=7):
+    """Search for Xendit payment confirmations using multiple Gmail queries."""
+    combined = {}
+
+    for template in _XENDIT_QUERY_TEMPLATES:
+        query = template.format(days_back=days_back)
+        messages = gmail_imap.search(query, limit=_XENDIT_SEARCH_LIMIT)
+        if messages is None:
+            return None
+
+        print(f"[Enrollment] Xendit query '{query}' returned {len(messages)} messages")
+        for message in messages:
+            key = (
+                message.get("date", ""),
+                message.get("from", ""),
+                message.get("subject", ""),
+            )
+            combined.setdefault(key, message)
+
+    if combined:
+        return list(combined.values())
+
+    fallback_query = f"xendit newer_than:{days_back}d"
+    messages = gmail_imap.search(fallback_query, limit=_XENDIT_SEARCH_LIMIT)
+    if messages is None:
+        return None
+
+    print(f"[Enrollment] Fallback Xendit query '{fallback_query}' returned {len(messages)} messages")
+    for message in messages:
+        key = (
+            message.get("date", ""),
+            message.get("from", ""),
+            message.get("subject", ""),
+        )
+        combined.setdefault(key, message)
+
+    return list(combined.values())
+
+
 def compare_payments_vs_enrolments(days_back=7):
     """Compare Xendit payments with Systeme.io enrollments."""
     print(f"[Enrollment] Comparing last {days_back} days...")
@@ -119,29 +225,21 @@ def compare_payments_vs_enrolments(days_back=7):
         print("[Enrollment] GMAIL_USER/GMAIL_APP_PASSWORD not set - skipping enrollment check")
         return _unavailable_report()
 
-    # Search Xendit invoice emails. Xendit's actual sender is
-    # `notifications@xendit.co` (not `noreply@...`). Use `from:xendit` so
-    # Gmail matches any sender containing "xendit" — catches any local-part
-    # or TLD variant. We post-filter by subject + payer-email extraction so
-    # only real paid invoices are counted.
-    xendit_msgs = gmail_imap.search(
-        f"from:xendit newer_than:{days_back}d",
-        limit=50,
-    )
+    xendit_msgs = _search_xendit_messages(days_back=days_back)
     if xendit_msgs is None:
         # IMAP configured but connect failed; treat as unavailable.
         return _unavailable_report()
 
-    print(f"[Enrollment] Xendit sender search returned {len(xendit_msgs)} messages")
+    print(f"[Enrollment] Xendit combined search returned {len(xendit_msgs)} unique messages")
 
     payments = []
+    skipped_subjects = []
+    missing_email_subjects = []
     for m in xendit_msgs:
         subject = m.get("subject", "")
-        subject_upper = subject.upper()
-        # Accept any "paid" invoice subject: "INVOICE PAID", "Invoice Paid",
-        # "Payment received", etc. Require "PAID" as the keyword since Xendit
-        # also sends "invoice created" / "reminder" emails we don't want.
-        if "PAID" not in subject_upper:
+        if not _xendit_subject_looks_paid(subject):
+            if len(skipped_subjects) < 5:
+                skipped_subjects.append(subject[:80] or "(no subject)")
             continue
         body = m.get("body", "")
         payer_email = _extract_payer_email(body)
@@ -149,6 +247,8 @@ def compare_payments_vs_enrolments(days_back=7):
             # Log once so Karl can see in Railway logs which subjects were
             # matched but failed body extraction (helps tune regex if needed).
             print(f"[Enrollment] Skipped Xendit msg (no payer email): {subject[:80]}")
+            if len(missing_email_subjects) < 5:
+                missing_email_subjects.append(subject[:80] or "(no subject)")
             continue
         payments.append({
             "email": payer_email,
@@ -159,12 +259,17 @@ def compare_payments_vs_enrolments(days_back=7):
         })
 
     print(f"[Enrollment] Found {len(payments)} Xendit invoices (with payer emails)")
+    if not payments:
+        if skipped_subjects:
+            print(f"[Enrollment] Sample non-payment Xendit subjects: {skipped_subjects}")
+        if missing_email_subjects:
+            print(f"[Enrollment] Sample paid-like Xendit subjects missing payer email: {missing_email_subjects}")
 
     # Search enrollment / verification emails from Systeme.io.
     # Default sender is course@karlcomboy.com (configurable via SYSTEME_SENDER).
     enrolment_msgs = gmail_imap.search(
         f"from:{SYSTEME_SENDER} newer_than:{days_back}d",
-        limit=50,
+        limit=_XENDIT_SEARCH_LIMIT,
     )
     if enrolment_msgs is None:
         enrolment_msgs = []

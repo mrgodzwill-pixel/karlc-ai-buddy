@@ -5,6 +5,8 @@ All sensitive values are loaded from environment variables for security.
 
 import os
 
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # === Facebook Page Config ===
 PAGE_ID = os.environ.get("FB_PAGE_ID", "")
 PAGE_NAME = os.environ.get("FB_PAGE_NAME", "Karl C")
@@ -47,8 +49,8 @@ GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 GMAIL_ENABLED = bool(GMAIL_USER and GMAIL_APP_PASSWORD)
 
 # === Directories ===
-DATA_DIR = os.environ.get("DATA_DIR", "/home/ubuntu/karlc-ai-buddy/data")
-REPORT_DIR = os.environ.get("REPORT_DIR", "/home/ubuntu/karlc-ai-buddy/data/reports")
+DATA_DIR = os.environ.get("DATA_DIR") or os.path.join(PROJECT_DIR, "data")
+REPORT_DIR = os.environ.get("REPORT_DIR") or os.path.join(DATA_DIR, "reports")
 
 # Ensure directories exist
 os.makedirs(DATA_DIR, exist_ok=True)

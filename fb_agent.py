@@ -6,7 +6,6 @@ Facebook Page Agent for Karl C
 - Handles webhook for real-time DM notifications
 """
 
-import json
 import os
 import re
 import requests
@@ -16,6 +15,7 @@ from config import (
     PAGE_ID, PAGE_NAME, PAGE_ACCESS_TOKEN,
     BASE_URL, KEYWORD_REPLIES, DATA_DIR, REPORT_DIR
 )
+from storage import file_lock, load_json, save_json
 from telegram_bot import send_report, send_suggested_replies_summary, send_message
 from ticket_system import get_pending_tickets, get_ticket_stats, format_pending_tickets_report, create_enrollment_ticket
 from enrollment_checker import compare_payments_vs_enrolments, format_comparison_telegram
@@ -89,16 +89,12 @@ def _load_json(filepath, default=None):
     """Load JSON file."""
     if default is None:
         default = []
-    if os.path.exists(filepath):
-        with open(filepath) as f:
-            return json.load(f)
-    return default
+    return load_json(filepath, default)
 
 
 def _save_json(filepath, data):
     """Save JSON file."""
-    with open(filepath, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    save_json(filepath, data)
 
 
 def match_keyword(text):
@@ -116,7 +112,11 @@ def compile_comments_report(hours_back=12):
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
     
     replied_file = os.path.join(DATA_DIR, "replied_comments.json")
-    replied = set(_load_json(replied_file, []))
+    pending_file = os.path.join(DATA_DIR, "pending_replies.json")
+
+    with file_lock(pending_file):
+        with file_lock(replied_file):
+            replied = set(_load_json(replied_file, []))
     
     posts = get_page_posts(limit=25)
     
@@ -182,8 +182,9 @@ def compile_comments_report(hours_back=12):
     report_data["total_suggested_replies"] = len(report_data["suggested_replies"])
     
     # Save pending replies
-    pending_file = os.path.join(DATA_DIR, "pending_replies.json")
-    _save_json(pending_file, report_data["suggested_replies"])
+    with file_lock(pending_file):
+        with file_lock(replied_file):
+            _save_json(pending_file, report_data["suggested_replies"])
     
     # Count DMs
     messages_file = os.path.join(DATA_DIR, "messages.json")
@@ -207,54 +208,55 @@ def approve_replies(action, specific_numbers=None):
     """Approve or skip suggested replies."""
     pending_file = os.path.join(DATA_DIR, "pending_replies.json")
     replied_file = os.path.join(DATA_DIR, "replied_comments.json")
-    
-    pending = _load_json(pending_file, [])
-    replied = _load_json(replied_file, [])
-    
-    results = []
-    
-    if action == "all":
-        for i, reply in enumerate(pending, 1):
-            result = reply_to_comment(reply["comment_id"], reply["suggested_reply"])
-            if "error" not in result:
-                replied.append(reply["comment_id"])
-                results.append({"reply_num": i, "status": "sent"})
-            else:
-                results.append({"reply_num": i, "status": "error"})
-    
-    elif action == "skip_all":
-        for i in range(len(pending)):
-            results.append({"reply_num": i + 1, "status": "skipped"})
-    
-    elif isinstance(action, list):
-        # Approve specific numbers
-        for i, reply in enumerate(pending, 1):
-            if i in action:
-                result = reply_to_comment(reply["comment_id"], reply["suggested_reply"])
-                if "error" not in result:
-                    replied.append(reply["comment_id"])
-                    results.append({"reply_num": i, "status": "sent"})
-                else:
-                    results.append({"reply_num": i, "status": "error"})
-            else:
-                results.append({"reply_num": i, "status": "skipped"})
-    
-    elif action == "skip" and specific_numbers:
-        for i, reply in enumerate(pending, 1):
-            if i in specific_numbers:
-                results.append({"reply_num": i, "status": "skipped"})
-            else:
-                result = reply_to_comment(reply["comment_id"], reply["suggested_reply"])
-                if "error" not in result:
-                    replied.append(reply["comment_id"])
-                    results.append({"reply_num": i, "status": "sent"})
-                else:
-                    results.append({"reply_num": i, "status": "error"})
-    
-    # Save updated replied list and clear pending
-    _save_json(replied_file, replied)
-    _save_json(pending_file, [])
-    
+
+    with file_lock(pending_file):
+        with file_lock(replied_file):
+            pending = _load_json(pending_file, [])
+            replied = _load_json(replied_file, [])
+
+            results = []
+
+            if action == "all":
+                for i, reply in enumerate(pending, 1):
+                    result = reply_to_comment(reply["comment_id"], reply["suggested_reply"])
+                    if "error" not in result:
+                        replied.append(reply["comment_id"])
+                        results.append({"reply_num": i, "status": "sent"})
+                    else:
+                        results.append({"reply_num": i, "status": "error"})
+
+            elif action == "skip_all":
+                for i in range(len(pending)):
+                    results.append({"reply_num": i + 1, "status": "skipped"})
+
+            elif isinstance(action, list):
+                # Approve specific numbers
+                for i, reply in enumerate(pending, 1):
+                    if i in action:
+                        result = reply_to_comment(reply["comment_id"], reply["suggested_reply"])
+                        if "error" not in result:
+                            replied.append(reply["comment_id"])
+                            results.append({"reply_num": i, "status": "sent"})
+                        else:
+                            results.append({"reply_num": i, "status": "error"})
+                    else:
+                        results.append({"reply_num": i, "status": "skipped"})
+
+            elif action == "skip" and specific_numbers:
+                for i, reply in enumerate(pending, 1):
+                    if i in specific_numbers:
+                        results.append({"reply_num": i, "status": "skipped"})
+                    else:
+                        result = reply_to_comment(reply["comment_id"], reply["suggested_reply"])
+                        if "error" not in result:
+                            replied.append(reply["comment_id"])
+                            results.append({"reply_num": i, "status": "sent"})
+                        else:
+                            results.append({"reply_num": i, "status": "error"})
+
+            _save_json(replied_file, replied)
+            _save_json(pending_file, [])
+
     return results
 
 
