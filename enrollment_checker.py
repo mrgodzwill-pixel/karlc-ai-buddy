@@ -17,6 +17,7 @@ from config import DATA_DIR, OWNER_EMAIL, SYSTEME_SENDER
 
 PHT = timezone(timedelta(hours=8))
 logger = logging.getLogger(__name__)
+XENDIT_SENDER = "notifications@xendit.co"
 _SYSTEM_EMAIL_DOMAINS = {
     "xendit.co",
     "xendit.com",
@@ -36,25 +37,13 @@ _XENDIT_SUCCESS_SUBJECT_KEYWORDS = (
     "PAID",
 )
 _XENDIT_QUERY_TEMPLATES = (
-    "from:xendit newer_than:{days_back}d",
-    'subject:"INVOICE PAID" newer_than:{days_back}d',
-    'subject:"Successful Payment" newer_than:{days_back}d',
-    'subject:"Payment received" newer_than:{days_back}d',
-    'subject:"Payment completed" newer_than:{days_back}d',
-    'subject:"Pembayaran Berhasil" newer_than:{days_back}d',
+    f"from:{XENDIT_SENDER} newer_than:{{days_back}}d",
+    f'from:{XENDIT_SENDER} subject:"INVOICE PAID" newer_than:{{days_back}}d',
+    f'from:{XENDIT_SENDER} subject:"Successful Payment" newer_than:{{days_back}}d',
+    f'from:{XENDIT_SENDER} subject:"Payment received" newer_than:{{days_back}}d',
+    f'from:{XENDIT_SENDER} subject:"Payment completed" newer_than:{{days_back}}d',
+    f'from:{XENDIT_SENDER} subject:"Pembayaran Berhasil" newer_than:{{days_back}}d',
 )
-
-
-def _extract_candidate_emails(text):
-    seen = set()
-    candidates = []
-    for raw in re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text or ""):
-        email_addr = raw.lower()
-        if email_addr in seen:
-            continue
-        seen.add(email_addr)
-        candidates.append(email_addr)
-    return candidates
 
 
 def _is_system_email(email_addr):
@@ -75,26 +64,23 @@ def _is_system_email(email_addr):
 
 
 def _extract_payer_email(text):
-    """Extract payer email from Xendit invoice email body."""
-    patterns = [
+    """Extract payer email from Xendit invoice email body.
+
+    Trust only the explicit `Payer Email` field to avoid false matches from
+    other addresses that may appear elsewhere in the email body."""
+    match = re.search(
         r'Payer Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
-        r'Customer Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
-        r'Buyer Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
-        r'Email Pelanggan[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
-        r'Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text or "", re.IGNORECASE)
-        if match:
-            email_addr = match.group(1).lower()
-            if not _is_system_email(email_addr):
-                return email_addr
+        text or "",
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
 
-    for email_addr in _extract_candidate_emails(text):
-        if not _is_system_email(email_addr):
-            return email_addr
+    email_addr = match.group(1).lower()
+    if _is_system_email(email_addr):
+        return None
 
-    return None
+    return email_addr
 
 
 def _extract_course_from_subject(subject):
@@ -138,24 +124,20 @@ def _extract_amount(text):
 
 
 def _extract_enrolment_email(text):
-    """Extract the first plausible student email from a Systeme.io email body.
+    """Extract the Systeme student email from the explicit `Email` field only."""
+    match = re.search(
+        r'Email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+        text or "",
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
 
-    Filters out Xendit/Systeme/Karl's own domains so auto-generated footer
-    links and sender addresses don't get picked up as the student."""
-    emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
-    excluded_emails = {SYSTEME_SENDER}
-    if OWNER_EMAIL:
-        excluded_emails.add(OWNER_EMAIL)
+    email_addr = match.group(1).lower()
+    if _is_system_email(email_addr):
+        return None
 
-    for raw in emails:
-        e = raw.lower()
-        if e in excluded_emails:
-            continue
-        domain = e.rsplit("@", 1)[-1]
-        if domain in _SYSTEM_EMAIL_DOMAINS:
-            continue
-        return e
-    return None
+    return email_addr
 
 
 def _unavailable_report():
@@ -200,7 +182,7 @@ def _search_xendit_messages(days_back=7):
     if combined:
         return list(combined.values())
 
-    fallback_query = f"xendit newer_than:{days_back}d"
+    fallback_query = f"from:{XENDIT_SENDER} newer_than:{days_back}d"
     messages = gmail_imap.search(fallback_query, limit=_XENDIT_SEARCH_LIMIT)
     if messages is None:
         return None

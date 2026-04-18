@@ -6,10 +6,10 @@ import enrollment_checker
 
 
 class EnrollmentCheckerTests(unittest.TestCase):
-    def test_extract_payer_email_accepts_customer_email_label(self):
+    def test_extract_payer_email_accepts_payer_email_label(self):
         body = """
         Successful payment
-        Customer Email: student@example.com
+        Payer Email: student@example.com
         Support: notifications@xendit.co
         """
 
@@ -18,21 +18,41 @@ class EnrollmentCheckerTests(unittest.TestCase):
             "student@example.com",
         )
 
-    def test_extract_payer_email_falls_back_to_first_non_system_email(self):
+    def test_extract_payer_email_ignores_other_email_labels(self):
         body = """
-        From: notifications@xendit.co
-        Student account: learner@example.com
+        Customer Email: learner@example.com
+        Reply to course@karlcomboy.com for help
+        """
+
+        self.assertIsNone(
+            enrollment_checker._extract_payer_email(body),
+        )
+
+    def test_extract_enrolment_email_accepts_email_label(self):
+        body = """
+        Welcome to the course
+        Email: student@example.com
         Reply to course@karlcomboy.com for help
         """
 
         self.assertEqual(
-            enrollment_checker._extract_payer_email(body),
-            "learner@example.com",
+            enrollment_checker._extract_enrolment_email(body),
+            "student@example.com",
+        )
+
+    def test_extract_enrolment_email_ignores_random_body_emails(self):
+        body = """
+        Support: course@karlcomboy.com
+        Backup contact: learner@example.com
+        """
+
+        self.assertIsNone(
+            enrollment_checker._extract_enrolment_email(body),
         )
 
     def test_compare_payments_uses_paid_specific_queries(self):
         messages = {
-            "from:xendit newer_than:7d": [
+            f"from:{enrollment_checker.XENDIT_SENDER} newer_than:7d": [
                 {
                     "subject": "Payment Link Expired",
                     "from": "notifications@xendit.co",
@@ -40,18 +60,18 @@ class EnrollmentCheckerTests(unittest.TestCase):
                     "body": "Expired payment reminder",
                 }
             ],
-            'subject:"INVOICE PAID" newer_than:7d': [
+            f'from:{enrollment_checker.XENDIT_SENDER} subject:"INVOICE PAID" newer_than:7d': [
                 {
                     "subject": "INVOICE PAID: karlcw-quickstart-799-123",
                     "from": "notifications@xendit.co",
                     "date": "Sat, 18 Apr 2026 07:30:00 +0800",
-                    "body": "Customer Email: payer@example.com\nTotal: PHP 799",
+                    "body": "Payer Email: payer@example.com\nTotal: PHP 799",
                 }
             ],
-            'subject:"Successful Payment" newer_than:7d': [],
-            'subject:"Payment received" newer_than:7d': [],
-            'subject:"Payment completed" newer_than:7d': [],
-            'subject:"Pembayaran Berhasil" newer_than:7d': [],
+            f'from:{enrollment_checker.XENDIT_SENDER} subject:"Successful Payment" newer_than:7d': [],
+            f'from:{enrollment_checker.XENDIT_SENDER} subject:"Payment received" newer_than:7d': [],
+            f'from:{enrollment_checker.XENDIT_SENDER} subject:"Payment completed" newer_than:7d': [],
+            f'from:{enrollment_checker.XENDIT_SENDER} subject:"Pembayaran Berhasil" newer_than:7d': [],
             f"from:{enrollment_checker.SYSTEME_SENDER} newer_than:7d": [],
         }
 
