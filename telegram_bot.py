@@ -378,7 +378,14 @@ def send_support_emails():
     )
 
     if not gmail_imap.available():
-        send_message("❌ Gmail support inbox is not configured. Check `GMAIL_USER` and `GMAIL_APP_PASSWORD`.")
+        gmail_user_present = bool(os.environ.get("GMAIL_USER", "").strip())
+        gmail_password_present = bool(os.environ.get("GMAIL_APP_PASSWORD", "").strip())
+        send_message(
+            "❌ Gmail support inbox is not configured.\n"
+            f"• `GMAIL_USER` present: {'yes' if gmail_user_present else 'no'}\n"
+            f"• `GMAIL_APP_PASSWORD` present: {'yes' if gmail_password_present else 'no'}\n"
+            "Check Railway variables, then redeploy."
+        )
         return
 
     emails = get_recent_support_emails(days_back=7, limit=10)
