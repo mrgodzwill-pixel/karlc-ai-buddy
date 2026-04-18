@@ -111,6 +111,54 @@ class XenditSyncTests(unittest.TestCase):
         self.assertEqual(record["email"], "maria@example.com")
         self.assertEqual(record["phone_normalized"], "639171234567")
 
+    def test_sync_recent_invoice_payments_enriches_phone_from_payment_api(self):
+        invoices = [
+            {
+                "id": "inv-123",
+                "payment_id": "py-123",
+                "external_id": "order-123",
+                "status": "PAID",
+                "paid_amount": 1499,
+                "payer_email": "juan@example.com",
+                "description": "MikroTik Hybrid",
+                "paid_at": "2026-04-18T01:30:00Z",
+                "currency": "PHP",
+            }
+        ]
+        payment_data = {
+            "id": "py-123",
+            "status": "SUCCEEDED",
+            "request_amount": 1499,
+            "currency": "PHP",
+            "description": "MikroTik Hybrid",
+            "customer_id": "cust-123",
+            "reference_id": "order-123",
+            "updated": "2026-04-18T01:31:00Z",
+        }
+        customer = {
+            "id": "cust-123",
+            "email": "juan@example.com",
+            "mobile_number": "+639171234567",
+            "individual_detail": {
+                "given_names": "Juan",
+                "surname": "Dela Cruz",
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payments_file = os.path.join(tmpdir, "xendit_payments.json")
+            with patch.object(xendit_payments, "XENDIT_PAYMENTS_FILE", payments_file):
+                with patch("xendit_sync.xendit_api.available", return_value=True):
+                    with patch("xendit_sync.xendit_api.list_paid_invoices", return_value=invoices):
+                        with patch("xendit_sync.xendit_api.get_payment", return_value=payment_data):
+                            with patch("xendit_sync.xendit_api.get_customer", return_value=customer):
+                                records = xendit_sync.sync_recent_invoice_payments(days_back=7)
+                                stored = xendit_payments.find_payment_by_email("juan@example.com")
+
+        self.assertTrue(records)
+        self.assertEqual(stored["payer_name"], "Juan Dela Cruz")
+        self.assertEqual(stored["phone_normalized"], "639171234567")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -364,6 +364,13 @@ def _record_to_customer_shape(data):
         if isinstance(customer["individual_detail"], dict):
             if not customer["individual_detail"].get("given_names"):
                 customer["individual_detail"]["given_names"] = name
+    top_level_given_names = str(customer.get("given_names") or "").strip()
+    top_level_surname = str(customer.get("surname") or "").strip()
+    if top_level_given_names or top_level_surname:
+        customer.setdefault("individual_detail", {})
+        if isinstance(customer["individual_detail"], dict):
+            customer["individual_detail"].setdefault("given_names", top_level_given_names)
+            customer["individual_detail"].setdefault("surname", top_level_surname)
     return customer
 
 
@@ -454,13 +461,30 @@ def build_record_from_invoice_data(invoice, source="xendit_invoice_api"):
     if amount_value in ("", None):
         amount_value = invoice.get("amount")
     currency = invoice.get("currency") or "PHP"
+    invoice_customer = _record_to_customer_shape(invoice.get("customer"))
+    payer_name = _first_non_empty(
+        _customer_to_payer_name(invoice_customer),
+        invoice.get("payer_name"),
+        invoice.get("customer_name"),
+    )
+    payer_email = _first_non_empty(
+        invoice.get("payer_email"),
+        invoice_customer.get("email"),
+        invoice.get("email"),
+    )
+    payer_phone = _first_non_empty(
+        invoice_customer.get("mobile_number"),
+        invoice_customer.get("phone_number"),
+        invoice.get("mobile_number"),
+        invoice.get("phone_number"),
+    )
 
     record = {
         "status": "paid",
-        "payer_name": "",
-        "email": invoice.get("payer_email", ""),
-        "phone": "",
-        "phone_normalized": "",
+        "payer_name": payer_name,
+        "email": payer_email,
+        "phone": payer_phone,
+        "phone_normalized": _normalise_phone_for_lookup(payer_phone),
         "course": course,
         "amount": _format_amount(amount_value, currency=currency),
         "payment_method": invoice.get("payment_method", "") or invoice.get("bank_code", ""),

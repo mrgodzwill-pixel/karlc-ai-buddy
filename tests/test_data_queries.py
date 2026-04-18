@@ -41,6 +41,15 @@ class DataQueriesTests(unittest.TestCase):
         self.assertIn("juan@example.com", context)
         self.assertIn("Stored Xendit payments last synced: 2026-04-18 09:00 PHT", context)
 
+    def test_get_payment_lookup_refreshes_xendit_sync_when_api_available(self):
+        with patch("data_queries.xendit_api.available", return_value=True):
+            with patch("data_queries.sync_recent_invoice_payments") as sync_recent:
+                with patch("data_queries.format_payment_lookup_summary", return_value={"summary": "ok"}):
+                    result = data_queries.get_payment_lookup("check payment for juan@example.com")
+
+        sync_recent.assert_called_once_with(days_back=30)
+        self.assertEqual(result["summary"], "ok")
+
 
 if __name__ == "__main__":
     unittest.main()

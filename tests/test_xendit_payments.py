@@ -60,6 +60,29 @@ class XenditPaymentsTests(unittest.TestCase):
         self.assertEqual(by_email["matches"][0]["payer_name"], "Juan Dela Cruz")
         self.assertEqual(by_phone["matches"][0]["phone_normalized"], "639171234567")
 
+    def test_build_record_from_invoice_data_reads_customer_phone(self):
+        invoice = {
+            "id": "inv-123",
+            "payment_id": "py-123",
+            "status": "PAID",
+            "paid_amount": 1499,
+            "currency": "PHP",
+            "description": "MikroTik Hybrid",
+            "paid_at": "2026-04-18T01:35:00Z",
+            "customer": {
+                "given_names": "Juan",
+                "surname": "Dela Cruz",
+                "email": "juan@example.com",
+                "mobile_number": "+639171234567",
+            },
+        }
+
+        record = xendit_payments.build_record_from_invoice_data(invoice)
+
+        self.assertEqual(record["payer_name"], "Juan Dela Cruz")
+        self.assertEqual(record["email"], "juan@example.com")
+        self.assertEqual(record["phone_normalized"], "639171234567")
+
 
 if __name__ == "__main__":
     unittest.main()

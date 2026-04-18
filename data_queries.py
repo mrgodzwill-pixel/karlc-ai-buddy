@@ -12,11 +12,13 @@ from email.utils import parsedate_to_datetime
 from config import (
     PAGE_ID, PAGE_ACCESS_TOKEN, BASE_URL, DATA_DIR, GMAIL_ENABLED
 )
+import xendit_api
 from xendit_payments import (
     extract_lookup_criteria,
     format_payment_lookup_summary,
     load_payment_store,
 )
+from xendit_sync import sync_recent_invoice_payments
 
 PHT = timezone(timedelta(hours=8))
 
@@ -280,6 +282,11 @@ def get_recent_emails(hours_back=1):
 
 def get_payment_lookup(user_message, limit=5):
     """Search stored Xendit payments for a specific payer lookup."""
+    if xendit_api.available():
+        try:
+            sync_recent_invoice_payments(days_back=30)
+        except Exception:
+            pass
     return format_payment_lookup_summary(user_message, limit=limit)
 
 
