@@ -219,6 +219,7 @@ def _preflight_checks():
     from config import (
         PAGE_ID, PAGE_ACCESS_TOKEN, FB_APP_SECRET, WEBHOOK_VERIFY_TOKEN,
         TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, GEMINI_API_KEY,
+        XENDIT_SECRET_KEY, XENDIT_INVOICE_WEBHOOK_TOKEN, XENDIT_PAYMENT_WEBHOOK_TOKEN,
     )
     missing = []
     if not PAGE_ID: missing.append("FB_PAGE_ID")
@@ -230,6 +231,11 @@ def _preflight_checks():
     if not GEMINI_API_KEY: missing.append("GEMINI_API_KEY")
     if missing:
         logger.warning("Missing env vars: %s", ", ".join(missing))
+
+    if XENDIT_SECRET_KEY and not XENDIT_INVOICE_WEBHOOK_TOKEN:
+        logger.warning("XENDIT_SECRET_KEY is set but XENDIT_INVOICE_WEBHOOK_TOKEN is missing")
+    if XENDIT_SECRET_KEY and not XENDIT_PAYMENT_WEBHOOK_TOKEN:
+        logger.warning("XENDIT_SECRET_KEY is set but XENDIT_PAYMENT_WEBHOOK_TOKEN is missing")
 
 
 def main():

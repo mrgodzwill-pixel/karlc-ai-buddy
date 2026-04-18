@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 # Using Google Gemini for AI
 
 import gmail_imap
+import xendit_api
 from config import (
     PAGE_ACCESS_TOKEN, BASE_URL, GEMINI_MODEL,
     GEMINI_FALLBACK_MODELS, get_gemini_url,
@@ -21,6 +22,7 @@ from config import (
 )
 from storage import file_lock, load_json, save_json
 from xendit_payments import find_payment_by_email, sync_payment_records
+from xendit_sync import sync_recent_invoice_payments
 
 PHT = timezone(timedelta(hours=8))
 CONVERSATIONS_FILE = os.path.join(DATA_DIR, "dm_conversations.json")
@@ -189,6 +191,23 @@ def search_xendit_payment(email):
             "phone": stored_match.get("phone", "") or stored_match.get("phone_normalized", ""),
             "source": "local_store",
         }
+
+    if xendit_api.available():
+        api_records = sync_recent_invoice_payments(days_back=30)
+        if api_records is not None:
+            stored_match = find_payment_by_email(email)
+            if stored_match:
+                return {
+                    "found": True,
+                    "email": email,
+                    "subject": stored_match.get("subject", ""),
+                    "date": stored_match.get("paid_at") or stored_match.get("date", ""),
+                    "course": stored_match.get("course", ""),
+                    "amount": stored_match.get("amount", ""),
+                    "payer_name": stored_match.get("payer_name", ""),
+                    "phone": stored_match.get("phone", "") or stored_match.get("phone_normalized", ""),
+                    "source": "xendit_api",
+                }
 
     if not gmail_imap.available():
         print("[AI Buddy] GMAIL_USER/GMAIL_APP_PASSWORD not set - skipping Gmail search")

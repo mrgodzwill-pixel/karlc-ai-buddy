@@ -105,7 +105,7 @@ def _parse_timestamp(value):
         return None
 
     try:
-        dt = datetime.fromisoformat(value)
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         try:
             dt = parsedate_to_datetime(value)
@@ -293,16 +293,116 @@ def _body_preview(text, max_chars=220):
     return preview[:max_chars]
 
 
+def _format_amount(value, currency="PHP"):
+    if value in ("", None):
+        return "N/A"
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+    if amount.is_integer():
+        amount_text = f"{int(amount):,}"
+    else:
+        amount_text = f"{amount:,.2f}"
+
+    return f"{(currency or 'PHP').upper()} {amount_text}"
+
+
+def _combine_name_parts(*parts):
+    values = [str(part or "").strip() for part in parts if str(part or "").strip()]
+    return " ".join(values)
+
+
+def _first_non_empty(*values):
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _looks_like_mobile_number(value):
+    digits = re.sub(r"\D", "", str(value or ""))
+    if digits.startswith("63") and len(digits) == 12 and digits[2:3] == "9":
+        return True
+    if digits.startswith("0") and len(digits) == 11 and digits[1:2] == "9":
+        return True
+    if digits.startswith("9") and len(digits) == 10:
+        return True
+    return False
+
+
+def _phone_candidate(value):
+    text = str(value or "").strip()
+    return text if _looks_like_mobile_number(text) else ""
+
+
+def _customer_to_payer_name(customer):
+    if not customer:
+        return ""
+
+    individual = customer.get("individual_detail") or {}
+    business = customer.get("business_detail") or {}
+    return _combine_name_parts(
+        individual.get("given_names"),
+        individual.get("surname"),
+    ) or str(business.get("business_name") or "").strip()
+
+
+def _record_to_customer_shape(data):
+    if not isinstance(data, dict):
+        return {}
+
+    customer = dict(data)
+    name = _combine_name_parts(
+        customer.get("first_name"),
+        customer.get("last_name"),
+    ) or str(customer.get("name") or "").strip()
+    if name:
+        customer.setdefault("individual_detail", {})
+        if isinstance(customer["individual_detail"], dict):
+            if not customer["individual_detail"].get("given_names"):
+                customer["individual_detail"]["given_names"] = name
+    return customer
+
+
+def _payment_record_date(record):
+    return (
+        record.get("paid_at")
+        or record.get("date")
+        or record.get("updated_at")
+        or record.get("created_at")
+        or record.get("created")
+        or ""
+    )
+
+
 def _record_key(record):
     raw_key = "|".join([
+        str(record.get("xendit_invoice_id", "") or ""),
+        str(record.get("xendit_payment_id", "") or ""),
+        str(record.get("payment_request_id", "") or ""),
+        str(record.get("external_id", "") or ""),
         str(record.get("invoice_id", "") or ""),
         str(record.get("subject", "") or ""),
-        str(record.get("date", "") or ""),
+        str(_payment_record_date(record) or ""),
         str(record.get("email", "") or ""),
         str(record.get("phone_normalized", "") or ""),
         str(record.get("amount", "") or ""),
     ])
     return hashlib.sha1(raw_key.encode("utf-8")).hexdigest()
+
+
+def _finalize_record(record):
+    final = dict(record or {})
+    final["email"] = str(final.get("email") or "").strip().lower()
+    final["payer_name"] = str(final.get("payer_name") or "").strip()
+    final["phone"] = str(final.get("phone") or "").strip()
+    if not final.get("phone_normalized"):
+        final["phone_normalized"] = _normalise_phone_for_lookup(final.get("phone"))
+    final["record_id"] = _record_key(final)
+    return final
 
 
 def extract_payment_record(message):
@@ -330,8 +430,146 @@ def extract_payment_record(message):
         "source": "gmail_imap",
         "body_preview": _body_preview(body),
     }
-    record["record_id"] = _record_key(record)
-    return record
+    return _finalize_record(record)
+
+
+def build_record_from_invoice_data(invoice, source="xendit_invoice_api"):
+    """Build a payment record from a legacy Xendit invoice object or webhook."""
+    invoice = dict(invoice or {})
+    status = str(invoice.get("status") or "").upper()
+    if status not in {"PAID", "SETTLED"}:
+        return None
+
+    description = str(invoice.get("description") or "").strip()
+    items = invoice.get("items") or []
+    course = description
+    if not course and items:
+        course = ", ".join(
+            str(item.get("name") or "").strip()
+            for item in items
+            if str(item.get("name") or "").strip()
+        )
+
+    amount_value = invoice.get("paid_amount")
+    if amount_value in ("", None):
+        amount_value = invoice.get("amount")
+    currency = invoice.get("currency") or "PHP"
+
+    record = {
+        "status": "paid",
+        "payer_name": "",
+        "email": invoice.get("payer_email", ""),
+        "phone": "",
+        "phone_normalized": "",
+        "course": course,
+        "amount": _format_amount(amount_value, currency=currency),
+        "payment_method": invoice.get("payment_method", "") or invoice.get("bank_code", ""),
+        "payment_channel": invoice.get("payment_channel", ""),
+        "payment_destination": invoice.get("payment_destination", ""),
+        "invoice_id": "",
+        "xendit_invoice_id": invoice.get("id", ""),
+        "xendit_payment_id": invoice.get("payment_id", ""),
+        "external_id": invoice.get("external_id", ""),
+        "subject": description or invoice.get("external_id", ""),
+        "date": invoice.get("paid_at") or invoice.get("updated") or invoice.get("created", ""),
+        "paid_at": invoice.get("paid_at", ""),
+        "created_at": invoice.get("created", ""),
+        "updated_at": invoice.get("updated", ""),
+        "currency": currency,
+        "source": source,
+        "description": description,
+        "raw_status": status,
+    }
+    return _finalize_record(record)
+
+
+def build_record_from_payment_data(payment_data, customer=None, source="xendit_payment_webhook"):
+    """Build a payment record from a Xendit Payments API webhook payload."""
+    payment_data = dict(payment_data or {})
+    status = str(payment_data.get("status") or "").upper()
+    if status not in {"SUCCEEDED", "PAID", "SETTLED"}:
+        return None
+
+    payment_details = payment_data.get("payment_details") or {}
+    metadata = payment_data.get("metadata") or {}
+    payload_customer = _record_to_customer_shape(payment_data.get("customer"))
+    description = str(payment_data.get("description") or "").strip()
+    payer_name = _first_non_empty(
+        _customer_to_payer_name(customer),
+        _customer_to_payer_name(payload_customer),
+        payment_data.get("payer_name"),
+        payment_details.get("payer_name"),
+        metadata.get("payer_name"),
+        metadata.get("customer_name"),
+        metadata.get("full_name"),
+        metadata.get("student_name"),
+    )
+    payer_email = _first_non_empty(
+        (customer or {}).get("email"),
+        payload_customer.get("email"),
+        payment_data.get("payer_email"),
+        payment_data.get("customer_email"),
+        payment_data.get("email"),
+        metadata.get("payer_email"),
+        metadata.get("customer_email"),
+        metadata.get("email"),
+        metadata.get("student_email"),
+    )
+    payer_phone = _first_non_empty(
+        (customer or {}).get("mobile_number"),
+        (customer or {}).get("phone_number"),
+        payload_customer.get("mobile_number"),
+        payload_customer.get("phone_number"),
+        payment_data.get("mobile_number"),
+        payment_data.get("phone_number"),
+        payment_data.get("payer_phone"),
+        payment_data.get("customer_phone"),
+        metadata.get("mobile_number"),
+        metadata.get("phone_number"),
+        metadata.get("payer_phone"),
+        metadata.get("customer_phone"),
+        metadata.get("phone"),
+        metadata.get("student_phone"),
+        _phone_candidate(payment_details.get("payer_account_number")),
+    )
+    currency = payment_data.get("currency") or "PHP"
+    amount_value = payment_data.get("request_amount")
+    if amount_value in ("", None):
+        amount_value = payment_data.get("amount")
+
+    record = {
+        "status": "paid",
+        "payer_name": payer_name,
+        "email": payer_email,
+        "phone": payer_phone,
+        "phone_normalized": _normalise_phone_for_lookup(payer_phone),
+        "course": (
+            description
+            or metadata.get("course", "")
+            or metadata.get("course_name", "")
+            or metadata.get("item_name", "")
+            or metadata.get("product_name", "")
+        ),
+        "amount": _format_amount(amount_value, currency=currency),
+        "payment_method": payment_data.get("payment_method", "") or payment_data.get("channel_code", ""),
+        "payment_channel": payment_data.get("channel_code", ""),
+        "invoice_id": metadata.get("invoice_id", "") or payment_data.get("invoice_id", ""),
+        "xendit_invoice_id": metadata.get("invoice_id", "") or payment_data.get("invoice_id", ""),
+        "xendit_payment_id": payment_data.get("payment_id", "") or payment_data.get("id", ""),
+        "payment_request_id": payment_data.get("payment_request_id", ""),
+        "external_id": payment_data.get("reference_id", "") or metadata.get("external_id", ""),
+        "subject": description or payment_data.get("reference_id", "") or metadata.get("external_id", ""),
+        "date": payment_data.get("updated") or payment_data.get("created", ""),
+        "paid_at": payment_details.get("capture_timestamp", "") or payment_data.get("updated", ""),
+        "created_at": payment_data.get("created", ""),
+        "updated_at": payment_data.get("updated", ""),
+        "currency": currency,
+        "source": source,
+        "description": description,
+        "customer_id": payment_data.get("customer_id", ""),
+        "raw_status": status,
+    }
+    return _finalize_record(record)
 
 
 def load_payment_store():
@@ -357,15 +595,80 @@ def _merge_record(existing, new_record):
     for field, value in (new_record or {}).items():
         if value not in ("", None):
             merged[field] = value
-    merged["record_id"] = _record_key(merged)
-    return merged
+    return _finalize_record(merged)
+
+
+def _timestamps_close(left, right, max_hours=48):
+    if not left or not right:
+        return False
+    return abs((left - right).total_seconds()) <= max_hours * 3600
+
+
+def _records_match(existing, new_record):
+    for field in ("xendit_payment_id", "payment_request_id", "xendit_invoice_id", "invoice_id"):
+        if existing.get(field) and new_record.get(field) and existing.get(field) == new_record.get(field):
+            return True
+
+    if (
+        existing.get("external_id")
+        and new_record.get("external_id")
+        and existing.get("external_id") == new_record.get("external_id")
+    ):
+        if existing.get("amount") == new_record.get("amount") or not existing.get("amount") or not new_record.get("amount"):
+            return True
+
+    existing_email = str(existing.get("email") or "").lower()
+    new_email = str(new_record.get("email") or "").lower()
+    if existing_email and new_email and existing_email == new_email:
+        existing_time = _parse_timestamp(_payment_record_date(existing))
+        new_time = _parse_timestamp(_payment_record_date(new_record))
+        if _timestamps_close(existing_time, new_time) and (
+            existing.get("amount") == new_record.get("amount")
+            or not existing.get("amount")
+            or not new_record.get("amount")
+        ):
+            return True
+
+    return existing.get("record_id") and existing.get("record_id") == new_record.get("record_id")
+
+
+def upsert_payment_records(records, checked_at=None):
+    """Merge generic payment records into the local payment store."""
+    checked_at = checked_at or datetime.now(PHT).isoformat()
+    store = load_payment_store()
+    payments = list(store.get("payments", []))
+
+    inserted_or_updated = []
+    for raw_record in records or []:
+        if not raw_record:
+            continue
+        record = _finalize_record(raw_record)
+
+        for idx, existing in enumerate(payments):
+            if _records_match(existing, record):
+                payments[idx] = _merge_record(existing, record)
+                inserted_or_updated.append(payments[idx])
+                break
+        else:
+            payments.append(record)
+            inserted_or_updated.append(record)
+
+    payments.sort(
+        key=lambda item: _parse_timestamp(_payment_record_date(item)) or datetime.min.replace(tzinfo=PHT),
+        reverse=True,
+    )
+
+    store = {
+        "checked_at": checked_at,
+        "payments": payments,
+    }
+    _save_payment_store(store)
+    return store, inserted_or_updated
 
 
 def sync_payment_records(messages, checked_at=None):
     """Merge parsed Xendit messages into the local payment store."""
     checked_at = checked_at or datetime.now(PHT).isoformat()
-    store = load_payment_store()
-    merged = {item.get("record_id"): item for item in store.get("payments", []) if item.get("record_id")}
 
     parsed_records = []
     for message in messages or []:
@@ -373,17 +676,7 @@ def sync_payment_records(messages, checked_at=None):
         if not record:
             continue
         parsed_records.append(record)
-        record_id = record["record_id"]
-        merged[record_id] = _merge_record(merged.get(record_id, {}), record)
-
-    payments = list(merged.values())
-    payments.sort(key=lambda item: _parse_timestamp(item.get("date")) or datetime.min.replace(tzinfo=PHT), reverse=True)
-
-    store = {
-        "checked_at": checked_at,
-        "payments": payments,
-    }
-    _save_payment_store(store)
+    store, _ = upsert_payment_records(parsed_records, checked_at=checked_at)
     return store, parsed_records
 
 
@@ -395,8 +688,35 @@ def find_payment_by_email(email):
 
     payments = load_payment_store().get("payments", [])
     matches = [item for item in payments if item.get("email", "").lower() == email]
-    matches.sort(key=lambda item: _parse_timestamp(item.get("date")) or datetime.min.replace(tzinfo=PHT), reverse=True)
+    matches.sort(
+        key=lambda item: _parse_timestamp(_payment_record_date(item)) or datetime.min.replace(tzinfo=PHT),
+        reverse=True,
+    )
     return matches[0] if matches else None
+
+
+def list_recent_payments(days_back=7, require_email=False):
+    """Return recent stored Xendit payments sorted newest-first."""
+    cutoff = datetime.now(PHT) - timedelta(days=days_back)
+    recent = []
+    for record in load_payment_store().get("payments", []):
+        if str(record.get("status") or "").lower() not in {"paid", "settled", "succeeded"}:
+            continue
+
+        if require_email and not str(record.get("email") or "").strip():
+            continue
+
+        record_time = _parse_timestamp(_payment_record_date(record))
+        if record_time is None or record_time < cutoff:
+            continue
+
+        recent.append(dict(record))
+
+    recent.sort(
+        key=lambda item: _parse_timestamp(_payment_record_date(item)) or datetime.min.replace(tzinfo=PHT),
+        reverse=True,
+    )
+    return recent
 
 
 def _extract_query_tokens(user_message):
@@ -472,7 +792,10 @@ def _score_payment(record, criteria):
         record.get("phone", ""),
         record.get("phone_normalized", ""),
         record.get("course", ""),
+        record.get("description", ""),
         record.get("subject", ""),
+        record.get("external_id", ""),
+        record.get("payment_channel", ""),
     ]))
 
     for query_email in criteria.get("emails", []):
@@ -510,7 +833,14 @@ def search_payment_records(user_message, limit=5):
         score, reasons = _score_payment(record, criteria)
         if score <= 0:
             continue
-        scored.append((score, _parse_timestamp(record.get("date")) or datetime.min.replace(tzinfo=PHT), reasons, record))
+        scored.append(
+            (
+                score,
+                _parse_timestamp(_payment_record_date(record)) or datetime.min.replace(tzinfo=PHT),
+                reasons,
+                record,
+            )
+        )
 
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
     matches = []
@@ -561,7 +891,7 @@ def format_payment_lookup_summary(user_message, limit=5):
         phone = item.get("phone") or item.get("phone_normalized") or "no phone"
         course = item.get("course") or item.get("subject") or "Unknown course"
         amount = item.get("amount") or "N/A"
-        date_label = item.get("date") or "unknown date"
+        date_label = _payment_record_date(item) or "unknown date"
         lines.append(
             f"• {payer_name} | {email} | {phone} | {course} | {amount} | {date_label}"
         )

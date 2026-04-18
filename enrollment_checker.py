@@ -15,14 +15,17 @@ from html import unescape
 import gmail_imap
 from config import DATA_DIR, OWNER_EMAIL, SYSTEME_SENDER
 from storage import save_json
+import xendit_api
 from xendit_payments import (
     extract_amount as _extract_amount,
     extract_course_from_subject as _extract_course_from_subject,
     extract_payer_email as _extract_payer_email,
     extract_payment_record,
+    list_recent_payments,
     subject_looks_paid as _xendit_subject_looks_paid,
     sync_payment_records,
 )
+from xendit_sync import sync_recent_invoice_payments
 
 PHT = timezone(timedelta(hours=8))
 logger = logging.getLogger(__name__)
@@ -106,6 +109,19 @@ def _unavailable_report():
     }
 
 
+def _record_to_payment_row(record):
+    return {
+        "payer_name": record.get("payer_name", ""),
+        "email": record.get("email", ""),
+        "phone": record.get("phone", "") or record.get("phone_normalized", ""),
+        "course": record.get("course") or record.get("description") or record.get("subject", ""),
+        "amount": record.get("amount", "N/A"),
+        "payment_method": record.get("payment_method", ""),
+        "subject": record.get("subject", ""),
+        "date": record.get("paid_at") or record.get("date", ""),
+    }
+
+
 def _search_xendit_messages(days_back=7):
     """Search for Xendit payment confirmations using multiple Gmail queries."""
     combined = {}
@@ -150,57 +166,58 @@ def compare_payments_vs_enrolments(days_back=7):
     print(f"[Enrollment] Comparing last {days_back} days...")
 
     if not gmail_imap.available():
-        print("[Enrollment] GMAIL_USER/GMAIL_APP_PASSWORD not set - skipping enrollment check")
-        return _unavailable_report()
-
-    xendit_msgs = _search_xendit_messages(days_back=days_back)
-    if xendit_msgs is None:
-        # IMAP configured but connect failed; treat as unavailable.
+        print("[Enrollment] Gmail IMAP is required to read Systeme enrollment confirmations")
         return _unavailable_report()
 
     checked_at = datetime.now(PHT).isoformat()
-    print(f"[Enrollment] Xendit combined search returned {len(xendit_msgs)} unique messages")
-
-    _, parsed_xendit_records = sync_payment_records(xendit_msgs, checked_at=checked_at)
-
     payments = []
-    skipped_subjects = []
-    missing_email_subjects = []
-    for m in xendit_msgs:
-        subject = m.get("subject", "")
-        if not _xendit_subject_looks_paid(subject):
-            if len(skipped_subjects) < 5:
-                skipped_subjects.append(subject[:80] or "(no subject)")
-            continue
-        record = extract_payment_record(m)
-        payer_email = (record or {}).get("email")
-        if not payer_email:
-            # Log once so Karl can see in Railway logs which subjects were
-            # matched but failed body extraction (helps tune regex if needed).
-            print(f"[Enrollment] Skipped Xendit msg (no payer email): {subject[:80]}")
-            if len(missing_email_subjects) < 5:
-                missing_email_subjects.append(subject[:80] or "(no subject)")
-            continue
-        payments.append({
-            "payer_name": record.get("payer_name", ""),
-            "email": payer_email,
-            "phone": record.get("phone", ""),
-            "course": record.get("course") or _extract_course_from_subject(subject),
-            "amount": record.get("amount") or _extract_amount(m.get("body", "")),
-            "payment_method": record.get("payment_method", ""),
-            "subject": subject,
-            "date": m.get("date", ""),
-        })
+    if xendit_api.available():
+        api_records = sync_recent_invoice_payments(days_back=days_back)
+        if api_records is not None:
+            print(f"[Enrollment] Xendit API sync returned {len(api_records)} paid invoice record(s)")
+        else:
+            print("[Enrollment] Xendit API sync failed; falling back to Gmail parsing if available")
 
-    print(
-        f"[Enrollment] Parsed {len(parsed_xendit_records)} paid Xendit records; "
-        f"{len(payments)} include payer emails for enrollment matching"
-    )
+    recent_store_records = list_recent_payments(days_back=days_back, require_email=True)
+    if recent_store_records:
+        payments = [_record_to_payment_row(record) for record in recent_store_records]
+        print(f"[Enrollment] Local Xendit store has {len(payments)} recent payment record(s) with payer emails")
+
     if not payments:
-        if skipped_subjects:
-            print(f"[Enrollment] Sample non-payment Xendit subjects: {skipped_subjects}")
-        if missing_email_subjects:
-            print(f"[Enrollment] Sample paid-like Xendit subjects missing payer email: {missing_email_subjects}")
+        xendit_msgs = _search_xendit_messages(days_back=days_back)
+        if xendit_msgs is None:
+            xendit_msgs = []
+
+        print(f"[Enrollment] Xendit combined Gmail search returned {len(xendit_msgs)} unique messages")
+
+        _, parsed_xendit_records = sync_payment_records(xendit_msgs, checked_at=checked_at)
+
+        skipped_subjects = []
+        missing_email_subjects = []
+        for m in xendit_msgs:
+            subject = m.get("subject", "")
+            if not _xendit_subject_looks_paid(subject):
+                if len(skipped_subjects) < 5:
+                    skipped_subjects.append(subject[:80] or "(no subject)")
+                continue
+            record = extract_payment_record(m)
+            payer_email = (record or {}).get("email")
+            if not payer_email:
+                print(f"[Enrollment] Skipped Xendit msg (no payer email): {subject[:80]}")
+                if len(missing_email_subjects) < 5:
+                    missing_email_subjects.append(subject[:80] or "(no subject)")
+                continue
+            payments.append(_record_to_payment_row(record))
+
+        print(
+            f"[Enrollment] Parsed {len(parsed_xendit_records)} paid Xendit Gmail records; "
+            f"{len(payments)} include payer emails for enrollment matching"
+        )
+        if not payments:
+            if skipped_subjects:
+                print(f"[Enrollment] Sample non-payment Xendit subjects: {skipped_subjects}")
+            if missing_email_subjects:
+                print(f"[Enrollment] Sample paid-like Xendit subjects missing payer email: {missing_email_subjects}")
 
     # Search enrollment / verification emails from Systeme.io.
     # Default sender is course@karlcomboy.com (configurable via SYSTEME_SENDER).

@@ -7,8 +7,9 @@ A 24/7 AI-powered personal assistant for managing the "Karl C" Facebook Page, co
 - **Facebook DM Handler**: Gemini AI-powered auto-reply for student inquiries
 - **Comment Monitoring**: Compiles comments and suggests keyword-based replies
 - **Student Ticket System**: Tracks enrollment issues with pending/done states
-- **Enrollment Checker**: Compares Xendit payments vs Systeme.io enrollments (requires Gmail IMAP)
-- **Local Xendit Store**: Persists parsed Xendit payer name/email/phone/payment details to JSON for reuse
+- **Enrollment Checker**: Compares Xendit payments vs Systeme.io enrollments using Xendit API when configured, with Gmail fallback
+- **Local Xendit Store**: Persists Xendit invoice/payment webhook and sync data to JSON for reuse
+- **Xendit Webhooks**: Accepts legacy invoice callbacks and new Payments API callbacks
 - **SMS Follow-ups**: Sends manual unresolved-ticket follow-ups via Semaphore
 - **Support Inbox Watcher**: Monitors emails sent to the support mailbox and alerts Karl in Telegram
 - **Telegram Bot**: Full command interface + natural language Gemini AI chat
@@ -17,10 +18,11 @@ A 24/7 AI-powered personal assistant for managing the "Karl C" Facebook Page, co
 ## Architecture
 
 ```
-Facebook Page DMs → Webhook (signed) → Background Worker → Telegram Notification
-                                     → Gmail Check → Ticket Creation
-Telegram Commands → Bot Listener → Command Handler → Response
-Scheduler (PHT)   → 7AM/7PM     → Report Generator → Telegram
+Facebook Page DMs        → Webhook (signed)         → Background Worker → Telegram Notification
+Xendit Invoice Webhooks  → /webhook/xendit/invoice  → Local Payment Store
+Xendit Payment Webhooks  → /webhook/xendit/payment  → Customer Enrichment → Local Payment Store
+Telegram Commands        → Bot Listener             → Command Handler     → Response
+Scheduler (PHT)          → 7AM/7PM                  → Report Generator    → Telegram
 ```
 
 ## Security features
@@ -80,6 +82,22 @@ Optional for SMS follow-ups:
 - `SEMAPHORE_SENDER_NAME` (optional)
 - `SUPPORT_EMAIL` (optional; defaults to `course@karlcomboy.com`)
 
+Optional for direct Xendit integration:
+
+- `XENDIT_SECRET_KEY` for API sync and customer enrichment
+- `XENDIT_INVOICE_WEBHOOK_TOKEN` for legacy invoice/payment-link callbacks
+- `XENDIT_PAYMENT_WEBHOOK_TOKEN` for Payments API callbacks
+- `XENDIT_WEBHOOK_TOKEN` as a shared fallback if both webhook types use the same token
+
+## Xendit setup
+
+Register these URLs in Xendit Dashboard / Webhook Settings:
+
+- Legacy invoice / payment link callback: `/webhook/xendit/invoice`
+- Payments API callback: `/webhook/xendit/payment`
+
+The app verifies `x-callback-token` against your configured webhook token and stores webhook data in `xendit_payments.json`.
+
 ## Telegram commands
 
 | Command | Action |
@@ -90,7 +108,7 @@ Optional for SMS follow-ups:
 | `/done 1` | Resolve ticket #1 |
 | `/follow 12 \| Juan Dela Cruz \| 09171234567` | Send SMS follow-up for ticket #12 |
 | `/support` | Show recent emails sent to the support inbox |
-| `/enrollment` | Run enrollment check (requires Gmail IMAP env vars) |
+| `/enrollment` | Run enrollment check (prefers Xendit API, falls back to Gmail IMAP) |
 | `/approve_all` | Approve all suggested replies |
 | `/status` | Check agent status |
 | Or just chat naturally! | AI-powered conversation |
@@ -103,7 +121,9 @@ Natural-language payment lookups are supported in Telegram chat, for example:
 
 ## Known limitations
 
-- **Enrollment checker** reads Gmail over IMAP. Set `GMAIL_USER` and `GMAIL_APP_PASSWORD` (a 16-char Google App Password, not your regular password — generate one at https://myaccount.google.com/apppasswords after turning on 2-Step Verification). If either env var is unset, the `/enrollment` command reports that Gmail is unavailable and skips the check.
+- **Legacy invoice callbacks** from Xendit reliably include invoice status, amount, payer email, payment method/channel, and invoice/payment IDs. According to Xendit’s legacy invoice webhook docs, they do not guarantee payer full name or phone number in that payload.
+- **Full name and phone number** are only guaranteed when your Xendit flow provides customer data, such as Payments API callbacks with `customer_id` plus a retrievable customer object, or when your own checkout flow already sends those customer fields to Xendit.
+- **Gmail fallback** is still useful if your current Xendit setup is email-heavy and not all payment flows are wired to webhooks yet. Set `GMAIL_USER` and `GMAIL_APP_PASSWORD` (a 16-char Google App Password, not your regular password — generate one at https://myaccount.google.com/apppasswords after turning on 2-Step Verification).
 - **No database** — JSON files only. Fine for Karl's volume, but see the data persistence warning above.
 - **Single process** — this is not built to scale horizontally.
 

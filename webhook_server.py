@@ -17,7 +17,14 @@ import threading
 from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify, abort
 
-from config import WEBHOOK_VERIFY_TOKEN, FB_APP_SECRET, DATA_DIR, PAGE_ID
+from config import (
+    WEBHOOK_VERIFY_TOKEN,
+    FB_APP_SECRET,
+    DATA_DIR,
+    PAGE_ID,
+    XENDIT_INVOICE_WEBHOOK_TOKEN,
+    XENDIT_PAYMENT_WEBHOOK_TOKEN,
+)
 from storage import file_lock
 
 PHT = timezone(timedelta(hours=8))
@@ -29,8 +36,10 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 MESSAGES_FILE = os.path.join(DATA_DIR, "messages.json")
 PROCESSED_MIDS_FILE = os.path.join(DATA_DIR, "processed_mids.json")
+PROCESSED_XENDIT_WEBHOOKS_FILE = os.path.join(DATA_DIR, "processed_xendit_webhooks.json")
 # Keep track of the last N processed message IDs to dedupe FB retries
 MAX_PROCESSED_MIDS = 1000
+MAX_PROCESSED_XENDIT_WEBHOOKS = 2000
 
 # Optional shared secret to protect debug endpoints (/messages, /health details)
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
@@ -103,6 +112,75 @@ def _mark_processed(mid: str) -> None:
         _save_json(PROCESSED_MIDS_FILE, mids)
 
 
+def _already_processed_xendit(webhook_key: str) -> bool:
+    if not webhook_key:
+        return False
+    with file_lock(PROCESSED_XENDIT_WEBHOOKS_FILE):
+        keys = _load_json(PROCESSED_XENDIT_WEBHOOKS_FILE, [])
+        return webhook_key in keys
+
+
+def _mark_processed_xendit(webhook_key: str) -> None:
+    if not webhook_key:
+        return
+    with file_lock(PROCESSED_XENDIT_WEBHOOKS_FILE):
+        keys = _load_json(PROCESSED_XENDIT_WEBHOOKS_FILE, [])
+        if webhook_key in keys:
+            return
+        keys.append(webhook_key)
+        if len(keys) > MAX_PROCESSED_XENDIT_WEBHOOKS:
+            keys = keys[-MAX_PROCESSED_XENDIT_WEBHOOKS:]
+        _save_json(PROCESSED_XENDIT_WEBHOOKS_FILE, keys)
+
+
+def _verify_xendit_callback_token(expected_token: str) -> bool:
+    if not expected_token:
+        logger.error("Xendit webhook token is not configured - rejecting webhook")
+        return False
+    received = request.headers.get("x-callback-token", "")
+    if not received:
+        return False
+    return hmac.compare_digest(received, expected_token)
+
+
+def _xendit_webhook_key(payload, fallback_event="xendit"):
+    payload = payload or {}
+    header_id = request.headers.get("webhook-id", "")
+    if header_id:
+        return f"{fallback_event}:{header_id}"
+
+    normalized = payload
+    if not ("event" in normalized and isinstance(normalized.get("data"), dict)):
+        for value in payload.values():
+            if not isinstance(value, dict):
+                continue
+            candidate = value.get("value") if isinstance(value.get("value"), dict) else value
+            if isinstance(candidate, dict) and "event" in candidate and isinstance(candidate.get("data"), dict):
+                normalized = candidate
+                break
+
+    if "event" in normalized and isinstance(normalized.get("data"), dict):
+        data = normalized.get("data") or {}
+        return ":".join(
+            [
+                str(normalized.get("event") or fallback_event),
+                str(data.get("payment_id") or data.get("id") or normalized.get("id") or ""),
+                str(data.get("status") or normalized.get("status") or ""),
+                str(data.get("updated") or normalized.get("updated") or normalized.get("created") or ""),
+            ]
+        )
+
+    return ":".join(
+        [
+            fallback_event,
+            str(payload.get("id") or ""),
+            str(payload.get("external_id") or ""),
+            str(payload.get("status") or ""),
+            str(payload.get("updated") or payload.get("paid_at") or payload.get("created") or ""),
+        ]
+    )
+
+
 def _handle_message_async(sender_id: str, text: str, sender_name: str, mid: str):
     """Background processing so we can return 200 to Facebook within its 20s window."""
     try:
@@ -133,6 +211,52 @@ def _handle_message_async(sender_id: str, text: str, sender_name: str, mid: str)
             )
         except Exception:
             logger.exception("Failed to notify Telegram of handler error")
+
+
+def _notify_xendit_webhook_failure(kind: str, webhook_key: str, error: Exception):
+    try:
+        from telegram_bot import send_message
+        send_message(
+            f"💳 *Xendit {kind} Webhook Failed*\n"
+            f"🆔 {webhook_key[:120]}\n"
+            f"⚠️ Error: {str(error)[:200]}"
+        )
+    except Exception:
+        logger.exception("Failed to notify Telegram of Xendit %s webhook error", kind.lower())
+
+
+def _process_xendit_invoice_webhook(payload: dict, webhook_key: str):
+    from xendit_sync import process_invoice_webhook
+
+    record = process_invoice_webhook(payload)
+    if record:
+        logger.info(
+            "Processed Xendit invoice webhook %s invoice=%s email=%s amount=%s",
+            webhook_key,
+            record.get("xendit_invoice_id") or payload.get("id", ""),
+            record.get("email", ""),
+            record.get("amount", ""),
+        )
+    else:
+        logger.info("Ignored Xendit invoice webhook %s with status=%s", webhook_key, payload.get("status", ""))
+    return record
+
+
+def _process_xendit_payment_webhook(payload: dict, webhook_key: str):
+    from xendit_sync import process_payment_webhook
+
+    record = process_payment_webhook(payload)
+    if record:
+        logger.info(
+            "Processed Xendit payment webhook %s payment=%s payer=%s email=%s",
+            webhook_key,
+            record.get("xendit_payment_id", ""),
+            record.get("payer_name", ""),
+            record.get("email", ""),
+        )
+    else:
+        logger.info("Ignored Xendit payment webhook %s", webhook_key)
+    return record
 
 
 @app.route("/webhook", methods=["GET"])
@@ -199,6 +323,52 @@ def handle_webhook():
         )
         t.start()
 
+    return "OK", 200
+
+
+@app.route("/webhook/xendit/invoice", methods=["POST"])
+def handle_xendit_invoice_webhook():
+    """Handle legacy Xendit invoice/payment-link webhooks."""
+    if not _verify_xendit_callback_token(XENDIT_INVOICE_WEBHOOK_TOKEN):
+        logger.warning("Invalid Xendit invoice callback token")
+        abort(403)
+
+    payload = request.get_json(silent=True) or {}
+    webhook_key = _xendit_webhook_key(payload, fallback_event="xendit_invoice")
+    if _already_processed_xendit(webhook_key):
+        logger.info("Skipping already-processed Xendit invoice webhook %s", webhook_key)
+        return "OK", 200
+
+    try:
+        _process_xendit_invoice_webhook(payload, webhook_key)
+        _mark_processed_xendit(webhook_key)
+    except Exception as e:
+        logger.exception("Xendit invoice webhook handler error")
+        _notify_xendit_webhook_failure("Invoice", webhook_key, e)
+        return "Webhook processing failed", 500
+    return "OK", 200
+
+
+@app.route("/webhook/xendit/payment", methods=["POST"])
+def handle_xendit_payment_webhook():
+    """Handle Xendit Payments API webhooks."""
+    if not _verify_xendit_callback_token(XENDIT_PAYMENT_WEBHOOK_TOKEN):
+        logger.warning("Invalid Xendit payment callback token")
+        abort(403)
+
+    payload = request.get_json(silent=True) or {}
+    webhook_key = _xendit_webhook_key(payload, fallback_event="xendit_payment")
+    if _already_processed_xendit(webhook_key):
+        logger.info("Skipping already-processed Xendit payment webhook %s", webhook_key)
+        return "OK", 200
+
+    try:
+        _process_xendit_payment_webhook(payload, webhook_key)
+        _mark_processed_xendit(webhook_key)
+    except Exception as e:
+        logger.exception("Xendit payment webhook handler error")
+        _notify_xendit_webhook_failure("Payment", webhook_key, e)
+        return "Webhook processing failed", 500
     return "OK", 200
 
 
