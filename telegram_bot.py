@@ -289,7 +289,8 @@ def send_help():
     msg += "✅ /done 1 - Mark ticket #1 as resolved\n"
     msg += "✅ /done 1 2 3 - Mark multiple tickets as done\n"
     msg += "✅ /done all - Mark all pending tickets as done\n"
-    msg += "📲 /follow 12 | Juan Dela Cruz | 09171234567 - SMS follow-up\n"
+    msg += "📲 /follow 12 - SMS follow-up using saved ticket name/number\n"
+    msg += "📲 /follow 12 | Juan Dela Cruz | 09171234567 - override saved details\n"
     msg += "📬 /support - View recent emails sent to support inbox\n"
     msg += "📊 /enrollment - Run enrollment comparison now\n"
     msg += "🗣️ /chat - Talk to AI Buddy (or just type normally!)\n"
@@ -450,19 +451,20 @@ def resolve_all_tickets():
 
 
 def _parse_follow_command(text):
-    """Parse `/follow ticket_id | name | phone`."""
+    """Parse `/follow ticket_id` or `/follow ticket_id | name | phone`."""
     raw = text.strip()[len("/follow"):].strip()
     parts = [part.strip() for part in raw.split("|")]
-    if len(parts) != 3:
-        raise ValueError("Usage: /follow 12 | Juan Dela Cruz | 09171234567")
+    if len(parts) == 1:
+        ticket_id_text = parts[0]
+        contact_name = ""
+        phone_number = ""
+    elif len(parts) == 3:
+        ticket_id_text, contact_name, phone_number = parts
+    else:
+        raise ValueError("Usage: /follow 12 OR /follow 12 | Juan Dela Cruz | 09171234567")
 
-    ticket_id_text, contact_name, phone_number = parts
     if not ticket_id_text.isdigit():
         raise ValueError("Ticket number should be a whole number like 12.")
-    if not contact_name:
-        raise ValueError("Contact name is required.")
-    if not phone_number:
-        raise ValueError("Phone number is required.")
 
     return int(ticket_id_text), contact_name, phone_number
 
@@ -479,6 +481,16 @@ def send_ticket_followup(ticket_id, contact_name, phone_number):
     ticket = get_ticket(ticket_id)
     if not ticket:
         send_message(f"❌ Ticket #{ticket_id} not found.")
+        return
+
+    contact_name = contact_name or str(ticket.get("student_name") or "").strip()
+    phone_number = phone_number or str(ticket.get("phone_number") or "").strip()
+    if not contact_name or not phone_number:
+        send_message(
+            "❌ Ticket has no saved name/phone yet.\n"
+            "Use `/follow 12 | Juan Dela Cruz | 09171234567` once, "
+            "or enrich the ticket via Xendit/support sync first."
+        )
         return
 
     try:

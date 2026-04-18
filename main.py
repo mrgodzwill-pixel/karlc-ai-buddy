@@ -106,6 +106,7 @@ def run_hourly_support_watch():
             get_new_support_emails,
             sync_support_email_tickets,
         )
+        from ticket_system import get_pending_tickets
         new_emails = get_new_support_emails(days_back=7, limit=20)
         if new_emails is None:
             logger.info("Support inbox watch skipped - Gmail IMAP not configured")
@@ -123,7 +124,28 @@ def run_hourly_support_watch():
             if created_tickets:
                 logger.info("Hourly support inbox watch created %s ticket(s)", len(created_tickets))
         else:
-            logger.info("Hourly support inbox watch found no new emails")
+            pending_support = get_pending_tickets("support_email")
+            if pending_support:
+                logger.info(
+                    "Hourly support inbox watch reminder for %s pending support ticket(s)",
+                    len(pending_support),
+                )
+                from telegram_bot import send_message
+                msg = "📬 *Hourly Support Reminder*\n"
+                msg += "━━━━━━━━━━━━━━━━━━\n\n"
+                msg += f"Pending support tickets: {len(pending_support)}\n\n"
+                for ticket in pending_support[:5]:
+                    msg += f"• #{ticket['id']} - {ticket.get('student_name', 'Unknown')}\n"
+                    msg += f"  {ticket.get('student_email', 'N/A')}\n"
+                    if ticket.get("phone_number"):
+                        msg += f"  {ticket.get('phone_number')}\n"
+                    if ticket.get("course_title"):
+                        msg += f"  {str(ticket.get('course_title', ''))[:60]}\n"
+                    msg += "\n"
+                msg += "Use `/support`, `/tickets`, or `/done <ticket-id>` to review."
+                send_message(msg)
+            else:
+                logger.info("Hourly support inbox watch found no new emails")
     except Exception:
         logger.exception("Hourly support inbox watch error")
         try:

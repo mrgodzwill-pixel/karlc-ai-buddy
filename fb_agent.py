@@ -356,12 +356,13 @@ def run_enrollment_check(notify_if_new_tickets=False):
         new_tickets = 0
         for student in report.get("unmatched_students", []):
             ticket = create_enrollment_ticket(
-                student_name=student.get("name", student.get("email", "Unknown")),
+                student_name=student.get("payer_name", student.get("name", student.get("email", "Unknown"))),
                 student_email=student.get("email", "N/A"),
                 course_title=student.get("course", "Unknown"),
                 price=student.get("amount", "Unknown"),
                 payment_method=student.get("payment_method", "Unknown"),
                 date_paid=student.get("date_paid", student.get("date", "Unknown")),
+                phone_number=student.get("phone", ""),
             )
             if ticket:
                 new_tickets += 1
@@ -373,15 +374,22 @@ def run_enrollment_check(notify_if_new_tickets=False):
         if new_tickets:
             print(f"[Enrollment] Created {new_tickets} new enrollment tickets")
 
-        if notify_if_new_tickets and new_tickets:
+        if notify_if_new_tickets and report.get("unmatched"):
             msg = "🚨 *Hourly Enrollment Alert*\n"
             msg += "━━━━━━━━━━━━━━━━━━\n\n"
-            msg += f"🔴 New unmatched students: {new_tickets}\n"
+            if new_tickets:
+                msg += f"🔴 New unmatched students: {new_tickets}\n"
+            else:
+                msg += f"🟠 Active unmatched students still pending: {report['unmatched']}\n"
             msg += f"💰 Xendit Payments checked: {report['total_payments']}\n"
             msg += f"✅ Systeme.io Enrollments: {report['total_enrolments']}\n\n"
             msg += "Latest unmatched students:\n"
             for student in report.get("unmatched_students", [])[:5]:
-                msg += f"• {student.get('email', 'N/A')} - {student.get('course', 'Unknown')}\n"
+                label = student.get("payer_name") or student.get("email", "N/A")
+                msg += f"• {label}"
+                if student.get("phone"):
+                    msg += f" | {student.get('phone')}"
+                msg += f" | {student.get('email', 'N/A')} - {student.get('course', 'Unknown')}\n"
             msg += "\nUse `/tickets` or `/enrollment` to review."
             send_message(msg)
         

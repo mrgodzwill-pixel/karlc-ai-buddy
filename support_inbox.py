@@ -76,6 +76,27 @@ def _parse_sender(from_text):
     return name, email
 
 
+def _lookup_xendit_contact(sender_email):
+    sender_email = str(sender_email or "").strip().lower()
+    if not sender_email:
+        return {}
+
+    try:
+        from xendit_payments import find_payment_by_email
+        record = find_payment_by_email(sender_email)
+    except Exception:
+        record = None
+
+    if not record:
+        return {}
+
+    return {
+        "student_name": str(record.get("payer_name") or "").strip(),
+        "phone_number": str(record.get("phone") or record.get("phone_normalized") or "").strip(),
+        "student_email": str(record.get("email") or sender_email).strip().lower(),
+    }
+
+
 def get_recent_support_emails(days_back=7, limit=10):
     """Return recent emails addressed to the support mailbox."""
     if not gmail_imap.available():
@@ -111,6 +132,7 @@ def sync_support_email_tickets(emails):
     from ticket_system import (
         create_support_email_ticket,
         find_matching_ticket,
+        update_ticket_contact_details,
     )
 
     synced = []
@@ -121,6 +143,9 @@ def sync_support_email_tickets(emails):
         subject = str(email.get("subject", "(no subject)")).strip() or "(no subject)"
         preview = str(email.get("preview", "")).strip()
         message_date = str(email.get("date", "")).strip()
+        xendit_contact = _lookup_xendit_contact(ticket_key_email)
+        contact_name = xendit_contact.get("student_name") or name
+        phone_number = xendit_contact.get("phone_number", "")
 
         ticket = find_matching_ticket(
             "support_email",
@@ -137,19 +162,29 @@ def sync_support_email_tickets(emails):
             )
         if not ticket:
             ticket = create_support_email_ticket(
-                student_name=name,
+                student_name=contact_name,
                 student_email=ticket_key_email,
                 subject=subject,
                 preview=preview,
                 email_date=message_date,
+                phone_number=phone_number,
             )
             if ticket:
                 created.append(ticket)
+        elif ticket:
+            ticket = update_ticket_contact_details(
+                ticket["id"],
+                student_name=contact_name,
+                phone_number=phone_number,
+                extra_info=preview,
+            ) or ticket
 
         updated_email = dict(email)
         if ticket:
             updated_email["ticket_id"] = ticket["id"]
             updated_email["ticket_status"] = ticket.get("status", "")
+            updated_email["contact_name"] = ticket.get("student_name", "") or contact_name
+            updated_email["phone_number"] = ticket.get("phone_number", "") or phone_number
         synced.append(updated_email)
 
     return synced, created
@@ -212,7 +247,11 @@ def format_support_emails_telegram(emails, title=None):
                 msg += f"🎫 Ticket: #{email['ticket_id']} ({ticket_status})\n"
             else:
                 msg += f"🎫 Ticket: #{email['ticket_id']}\n"
+        if email.get("contact_name"):
+            msg += f"👤 Contact: {str(email.get('contact_name', ''))[:80]}\n"
         msg += f"👤 From: {email.get('from', 'Unknown')[:80]}\n"
+        if email.get("phone_number"):
+            msg += f"📱 {email.get('phone_number', '')[:40]}\n"
         msg += f"📝 Subject: {email.get('subject', '(no subject)')[:80]}\n"
         msg += f"🕐 {timestamp} PHT\n"
         if email.get("preview"):

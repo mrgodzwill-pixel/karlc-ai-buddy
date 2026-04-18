@@ -112,6 +112,31 @@ class TicketSystemResolutionTests(unittest.TestCase):
                     updated_ticket["followup_history"][0]["phone_number"],
                     "639171234567",
                 )
+                self.assertEqual(updated_ticket["phone_number"], "639171234567")
+
+    def test_duplicate_pending_ticket_gets_phone_enrichment(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tickets_file = f"{tmpdir}/tickets.json"
+            overrides_file = f"{tmpdir}/resolved_enrollment_overrides.json"
+
+            with patch.object(ticket_system, "TICKETS_FILE", tickets_file), patch.object(
+                ticket_system, "ENROLLMENT_RESOLUTIONS_FILE", overrides_file
+            ):
+                first = ticket_system.create_support_email_ticket(
+                    student_name="Juan",
+                    student_email="juan@example.com",
+                    subject="Support email",
+                )
+                duplicate = ticket_system.create_support_email_ticket(
+                    student_name="Juan Dela Cruz",
+                    student_email="juan@example.com",
+                    subject="Support email",
+                    phone_number="639171234567",
+                )
+                stored = ticket_system.get_ticket(first["id"])
+
+                self.assertIsNone(duplicate)
+                self.assertEqual(stored["phone_number"], "639171234567")
 
     def test_resolve_all_pending_tickets_marks_every_pending_ticket_done(self):
         with tempfile.TemporaryDirectory() as tmpdir:

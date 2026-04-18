@@ -64,6 +64,70 @@ def _mask_phone_number(phone_number):
     return f"{'•' * (len(phone) - 4)}{phone[-4:]}"
 
 
+def _is_missing_value(value):
+    normalized = str(value or "").strip().lower()
+    return normalized in {"", "unknown", "n/a", "na", "unknown-support-email"}
+
+
+def _merge_ticket_details(ticket, student_name="", student_email="", course_title="", price="",
+                          payment_method="", date_paid="", fb_sender_id="", extra_info="",
+                          phone_number=""):
+    changed = False
+
+    current_name = str(ticket.get("student_name") or "").strip()
+    current_email = str(ticket.get("student_email") or "").strip()
+    incoming_name = str(student_name or "").strip()
+    if incoming_name and (
+        _is_missing_value(current_name)
+        or current_name.lower() == current_email.lower()
+    ) and current_name != incoming_name:
+        ticket["student_name"] = incoming_name
+        changed = True
+
+    incoming_email = str(student_email or "").strip()
+    if incoming_email and _is_missing_value(ticket.get("student_email")):
+        ticket["student_email"] = incoming_email
+        changed = True
+
+    incoming_course = str(course_title or "").strip()
+    if incoming_course and _is_missing_value(ticket.get("course_title")):
+        ticket["course_title"] = incoming_course
+        changed = True
+
+    incoming_price = str(price or "").strip()
+    if incoming_price and _is_missing_value(ticket.get("price")):
+        ticket["price"] = incoming_price
+        changed = True
+
+    incoming_payment_method = str(payment_method or "").strip()
+    if incoming_payment_method and _is_missing_value(ticket.get("payment_method")):
+        ticket["payment_method"] = incoming_payment_method
+        changed = True
+
+    incoming_date_paid = str(date_paid or "").strip()
+    if incoming_date_paid and _is_missing_value(ticket.get("date_paid")):
+        ticket["date_paid"] = incoming_date_paid
+        changed = True
+
+    incoming_fb_sender_id = str(fb_sender_id or "").strip()
+    if incoming_fb_sender_id and _is_missing_value(ticket.get("fb_sender_id")):
+        ticket["fb_sender_id"] = incoming_fb_sender_id
+        changed = True
+
+    incoming_extra = str(extra_info or "").strip()
+    current_extra = str(ticket.get("extra_info") or "").strip()
+    if incoming_extra and (not current_extra or len(current_extra) < len(incoming_extra)):
+        ticket["extra_info"] = incoming_extra
+        changed = True
+
+    incoming_phone = str(phone_number or "").strip()
+    if incoming_phone and _is_missing_value(ticket.get("phone_number")):
+        ticket["phone_number"] = incoming_phone
+        changed = True
+
+    return changed
+
+
 def add_enrollment_resolution(ticket):
     """Suppress future unmatched alerts for this exact enrollment record."""
     if not ticket or ticket.get("type") != "enrollment_incomplete":
@@ -131,7 +195,8 @@ def filter_resolved_enrollment_students(students):
 
 
 def create_ticket(ticket_type, student_name, student_email, course_title="", price="",
-                  payment_method="", date_paid="", fb_sender_id="", extra_info=""):
+                  payment_method="", date_paid="", fb_sender_id="", extra_info="",
+                  phone_number=""):
     """Create a new ticket, skipping if a matching pending ticket already exists."""
     with file_lock(TICKETS_FILE):
         tickets = _load_tickets()
@@ -141,6 +206,19 @@ def create_ticket(ticket_type, student_name, student_email, course_title="", pri
                 t["type"] == ticket_type and
                 t["course_title"] == course_title and
                 t["status"] == "pending"):
+                if _merge_ticket_details(
+                    t,
+                    student_name=student_name,
+                    student_email=student_email,
+                    course_title=course_title,
+                    price=price,
+                    payment_method=payment_method,
+                    date_paid=date_paid,
+                    fb_sender_id=fb_sender_id,
+                    extra_info=extra_info,
+                    phone_number=phone_number,
+                ):
+                    _save_tickets(tickets)
                 return None  # Duplicate
 
         # Derive next ID from max existing ID (safer than len(tickets)+1)
@@ -157,6 +235,7 @@ def create_ticket(ticket_type, student_name, student_email, course_title="", pri
             "date_paid": date_paid,
             "fb_sender_id": fb_sender_id,
             "extra_info": extra_info,
+            "phone_number": phone_number,
             "status": "pending",
             "created_at": datetime.now(PHT).isoformat(),
             "resolved_at": None,
@@ -192,7 +271,7 @@ def create_no_payment_ticket(student_name, student_email, fb_sender_id=""):
 
 
 def create_enrollment_ticket(student_name, student_email, course_title, price,
-                              payment_method="", date_paid=""):
+                              payment_method="", date_paid="", phone_number=""):
     """Create a ticket for student who paid but didn't complete enrollment."""
     return create_ticket(
         ticket_type="enrollment_incomplete",
@@ -202,10 +281,12 @@ def create_enrollment_ticket(student_name, student_email, course_title, price,
         price=price,
         payment_method=payment_method,
         date_paid=date_paid,
+        phone_number=phone_number,
     )
 
 
-def create_support_email_ticket(student_name, student_email, subject, preview="", email_date=""):
+def create_support_email_ticket(student_name, student_email, subject, preview="", email_date="",
+                                phone_number=""):
     """Create a ticket for a support inbox email that needs manual handling."""
     return create_ticket(
         ticket_type="support_email",
@@ -215,7 +296,34 @@ def create_support_email_ticket(student_name, student_email, subject, preview=""
         payment_method="support_email",
         date_paid=email_date,
         extra_info=preview,
+        phone_number=phone_number,
     )
+
+
+def update_ticket_contact_details(ticket_id, student_name="", student_email="", course_title="",
+                                  price="", payment_method="", date_paid="", fb_sender_id="",
+                                  extra_info="", phone_number=""):
+    """Update stored ticket contact details without changing its status."""
+    with file_lock(TICKETS_FILE):
+        tickets = _load_tickets()
+        for ticket in tickets:
+            if ticket.get("id") != ticket_id:
+                continue
+            if _merge_ticket_details(
+                ticket,
+                student_name=student_name,
+                student_email=student_email,
+                course_title=course_title,
+                price=price,
+                payment_method=payment_method,
+                date_paid=date_paid,
+                fb_sender_id=fb_sender_id,
+                extra_info=extra_info,
+                phone_number=phone_number,
+            ):
+                _save_tickets(tickets)
+            return ticket
+    return None
 
 
 def resolve_ticket(ticket_id):
@@ -307,6 +415,11 @@ def record_followup_attempt(ticket_id, contact_name, phone_number, message_text,
                     "sent_at": datetime.now(PHT).isoformat(),
                 }
             )
+            _merge_ticket_details(
+                ticket,
+                student_name=contact_name,
+                phone_number=phone_number,
+            )
             _save_tickets(tickets)
             return ticket
 
@@ -365,6 +478,8 @@ def format_pending_tickets_telegram():
         msg += f"{icon} *Ticket #{t['id']}* - {label}\n"
         msg += f"   👤 {t['student_name']}\n"
         msg += f"   📧 {t['student_email']}\n"
+        if t.get("phone_number"):
+            msg += f"   📱 {t['phone_number']}\n"
         if t["course_title"]:
             if t["type"] == "support_email":
                 msg += f"   📝 {t['course_title']}\n"
@@ -410,6 +525,8 @@ def format_pending_tickets_report():
 
         followups = t.get("followup_history", [])
         student_label = t["student_name"]
+        if t.get("phone_number"):
+            student_label += f" ({t['phone_number']})"
         if followups:
             latest = followups[-1]
             student_label += f" (SMS {latest.get('status', 'sent')} {latest.get('sent_at', '')[:10]})"
