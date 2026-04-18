@@ -20,3 +20,7 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: SEMAPHORE_API_KEY
+        sync: false
+      - key: SEMAPHORE_SENDER_NAME
+        sync: false

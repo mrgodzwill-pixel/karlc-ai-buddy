@@ -79,6 +79,40 @@ class TicketSystemResolutionTests(unittest.TestCase):
                 self.assertEqual(active, [])
                 self.assertEqual(len(suppressed), 1)
 
+    def test_record_followup_attempt_persists_history(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tickets_file = f"{tmpdir}/tickets.json"
+            overrides_file = f"{tmpdir}/resolved_enrollment_overrides.json"
+
+            with patch.object(ticket_system, "TICKETS_FILE", tickets_file), patch.object(
+                ticket_system, "ENROLLMENT_RESOLUTIONS_FILE", overrides_file
+            ):
+                ticket = ticket_system.create_enrollment_ticket(
+                    student_name="Student One",
+                    student_email="student@example.com",
+                    course_title="MikroTik Hybrid",
+                    price="PHP 1499",
+                    date_paid="Sat, 18 Apr 2026 10:00:00 +0800",
+                )
+
+                updated_ticket = ticket_system.record_followup_attempt(
+                    ticket_id=ticket["id"],
+                    contact_name="Student One",
+                    phone_number="639171234567",
+                    message_text="Follow up message",
+                    provider="semaphore",
+                    result_status="Queued",
+                    provider_message_id="12345",
+                    provider_response={"status": "Queued"},
+                )
+
+                self.assertEqual(updated_ticket["id"], ticket["id"])
+                self.assertEqual(len(updated_ticket["followup_history"]), 1)
+                self.assertEqual(
+                    updated_ticket["followup_history"][0]["phone_number"],
+                    "639171234567",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

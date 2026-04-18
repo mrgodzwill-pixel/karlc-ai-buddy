@@ -18,7 +18,7 @@ from config import (
     TELEGRAM_API_URL, TELEGRAM_CHAT_ID,
     PAGE_NAME, GEMINI_MODEL,
     GEMINI_FALLBACK_MODELS, get_gemini_url,
-    AI_BUDDY_SYSTEM_PROMPT, DATA_DIR
+    AI_BUDDY_SYSTEM_PROMPT, DATA_DIR, SEMAPHORE_ENABLED
 )
 from storage import file_lock, load_json, save_json
 
@@ -288,6 +288,7 @@ def send_help():
     msg += "🎫 /tickets - View pending student tickets\n"
     msg += "✅ /done 1 - Mark ticket #1 as resolved\n"
     msg += "✅ /done 1 2 3 - Mark multiple tickets as done\n"
+    msg += "📲 /follow 12 | Juan Dela Cruz | 09171234567 - SMS follow-up\n"
     msg += "📊 /enrollment - Run enrollment comparison now\n"
     msg += "🗣️ /chat - Talk to AI Buddy (or just type normally!)\n"
     msg += "❓ /help - Show this help\n"
@@ -385,6 +386,67 @@ def resolve_tickets(ticket_ids):
             msg += f"❌ Ticket #{tid} - Not found\n\n"
 
     msg += "━━━━━━━━━━━━━━━━━━"
+    send_message(msg)
+
+
+def _parse_follow_command(text):
+    """Parse `/follow ticket_id | name | phone`."""
+    raw = text.strip()[len("/follow"):].strip()
+    parts = [part.strip() for part in raw.split("|")]
+    if len(parts) != 3:
+        raise ValueError("Usage: /follow 12 | Juan Dela Cruz | 09171234567")
+
+    ticket_id_text, contact_name, phone_number = parts
+    if not ticket_id_text.isdigit():
+        raise ValueError("Ticket number should be a whole number like 12.")
+    if not contact_name:
+        raise ValueError("Contact name is required.")
+    if not phone_number:
+        raise ValueError("Phone number is required.")
+
+    return int(ticket_id_text), contact_name, phone_number
+
+
+def send_ticket_followup(ticket_id, contact_name, phone_number):
+    """Send an SMS follow-up for a specific ticket."""
+    if not SEMAPHORE_ENABLED:
+        send_message("❌ Semaphore SMS is not configured yet. Add `SEMAPHORE_API_KEY` in Railway first.")
+        return
+
+    from sms_followup import send_followup_sms
+    from ticket_system import get_ticket, record_followup_attempt
+
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        send_message(f"❌ Ticket #{ticket_id} not found.")
+        return
+
+    try:
+        result = send_followup_sms(ticket, contact_name, phone_number)
+        record_followup_attempt(
+            ticket_id=ticket_id,
+            contact_name=contact_name,
+            phone_number=result["recipient"],
+            message_text=result["message_text"],
+            provider="semaphore",
+            result_status=result["status"],
+            provider_message_id=result["provider_message_id"],
+            provider_response=result["provider_response"],
+        )
+    except Exception as e:
+        send_message(f"❌ Follow-up failed: {str(e)[:200]}")
+        return
+
+    msg = "📲 *Follow-up Sent*\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    msg += f"🎫 Ticket #{ticket_id}\n"
+    msg += f"👤 {contact_name}\n"
+    msg += f"📱 {result['recipient']}\n"
+    msg += f"📡 Semaphore status: {result['status']}\n"
+    if ticket.get("course_title"):
+        msg += f"📚 {ticket['course_title'][:40]}\n"
+    msg += "\n✉️ Message:\n"
+    msg += result["message_text"]
     send_message(msg)
 
 
@@ -569,6 +631,14 @@ def process_message(text):
         else:
             send_message("Usage: /done 1 or /done 1 2 3")
         return "done"
+
+    if text_lower.startswith("/follow"):
+        try:
+            ticket_id, contact_name, phone_number = _parse_follow_command(text)
+            send_ticket_followup(ticket_id, contact_name, phone_number)
+        except Exception as e:
+            send_message(f"❌ {str(e)[:200]}")
+        return "follow"
 
     # === NATURAL LANGUAGE (AI CHAT) ===
     # If not a command, treat as AI chat

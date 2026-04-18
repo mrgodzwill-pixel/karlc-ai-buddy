@@ -57,6 +57,13 @@ def _student_to_enrollment_key(student):
     )
 
 
+def _mask_phone_number(phone_number):
+    phone = str(phone_number or "").strip()
+    if len(phone) <= 4:
+        return phone
+    return f"{'•' * (len(phone) - 4)}{phone[-4:]}"
+
+
 def add_enrollment_resolution(ticket):
     """Suppress future unmatched alerts for this exact enrollment record."""
     if not ticket or ticket.get("type") != "enrollment_incomplete":
@@ -153,6 +160,7 @@ def create_ticket(ticket_type, student_name, student_email, course_title="", pri
             "status": "pending",
             "created_at": datetime.now(PHT).isoformat(),
             "resolved_at": None,
+            "followup_history": [],
         }
         tickets.append(ticket)
         _save_tickets(tickets)
@@ -213,6 +221,44 @@ def resolve_ticket(ticket_id):
         return None, "not_found"
 
 
+def get_ticket(ticket_id):
+    """Return a ticket by ID."""
+    tickets = _load_tickets()
+    for ticket in tickets:
+        if ticket["id"] == ticket_id:
+            return ticket
+    return None
+
+
+def record_followup_attempt(ticket_id, contact_name, phone_number, message_text,
+                            provider, result_status, provider_message_id="",
+                            provider_response=None):
+    """Append follow-up metadata to a ticket."""
+    with file_lock(TICKETS_FILE):
+        tickets = _load_tickets()
+        for ticket in tickets:
+            if ticket["id"] != ticket_id:
+                continue
+
+            history = ticket.setdefault("followup_history", [])
+            history.append(
+                {
+                    "contact_name": contact_name,
+                    "phone_number": phone_number,
+                    "message_text": message_text,
+                    "provider": provider,
+                    "status": result_status,
+                    "provider_message_id": provider_message_id,
+                    "provider_response": provider_response or {},
+                    "sent_at": datetime.now(PHT).isoformat(),
+                }
+            )
+            _save_tickets(tickets)
+            return ticket
+
+    return None
+
+
 def get_pending_tickets(ticket_type=None):
     """Get all pending tickets, optionally filtered by type."""
     tickets = _load_tickets()
@@ -266,6 +312,12 @@ def format_pending_tickets_telegram():
             msg += f"   📚 {t['course_title']}\n"
         if t["price"]:
             msg += f"   💰 {t['price']}\n"
+        followups = t.get("followup_history", [])
+        if followups:
+            latest = followups[-1]
+            masked_phone = _mask_phone_number(latest.get("phone_number", ""))
+            msg += f"   📲 Follow-up: {latest.get('status', 'sent')} to {masked_phone or 'N/A'}\n"
+            msg += f"   🕐 Last SMS: {latest.get('sent_at', '')[:16]}\n"
         msg += f"   🕐 {t['created_at'][:16]}\n\n"
     
     msg += "━━━━━━━━━━━━━━━━━━\n"
@@ -292,7 +344,13 @@ def format_pending_tickets_report():
             "dm_no_payment": "DM ❌",
             "enrollment_incomplete": "Enrollment ⚠️",
         }.get(t["type"], t["type"])
-        
-        md += f"| {t['id']} | {type_label} | {t['student_name']} | {t['student_email']} | {t.get('course_title', 'N/A')} | {t.get('price', 'N/A')} | {t['created_at'][:10]} |\n"
+
+        followups = t.get("followup_history", [])
+        student_label = t["student_name"]
+        if followups:
+            latest = followups[-1]
+            student_label += f" (SMS {latest.get('status', 'sent')} {latest.get('sent_at', '')[:10]})"
+
+        md += f"| {t['id']} | {type_label} | {student_label} | {t['student_email']} | {t.get('course_title', 'N/A')} | {t.get('price', 'N/A')} | {t['created_at'][:10]} |\n"
     
     return md

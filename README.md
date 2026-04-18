@@ -8,6 +8,7 @@ A 24/7 AI-powered personal assistant for managing the "Karl C" Facebook Page, co
 - **Comment Monitoring**: Compiles comments and suggests keyword-based replies
 - **Student Ticket System**: Tracks enrollment issues with pending/done states
 - **Enrollment Checker**: Compares Xendit payments vs Systeme.io enrollments (requires Gmail IMAP)
+- **SMS Follow-ups**: Sends manual unresolved-ticket follow-ups via Semaphore
 - **Telegram Bot**: Full command interface + natural language Gemini AI chat
 - **Scheduled Reports**: 7AM & 7PM Philippine Time, daily, via Telegram
 
@@ -70,6 +71,11 @@ See `.env.example`. Required at minimum:
 
 If any of these are missing, the app will log a warning on startup.
 
+Optional for SMS follow-ups:
+
+- `SEMAPHORE_API_KEY`
+- `SEMAPHORE_SENDER_NAME` (optional)
+
 ## Telegram commands
 
 | Command | Action |
@@ -78,6 +84,7 @@ If any of these are missing, the app will log a warning on startup.
 | `/report` | Generate report now |
 | `/tickets` | View pending tickets |
 | `/done 1` | Resolve ticket #1 |
+| `/follow 12 \| Juan Dela Cruz \| 09171234567` | Send SMS follow-up for ticket #12 |
 | `/enrollment` | Run enrollment check (requires Gmail IMAP env vars) |
 | `/approve_all` | Approve all suggested replies |
 | `/status` | Check agent status |

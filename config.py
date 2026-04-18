@@ -48,6 +48,11 @@ GMAIL_USER = os.environ.get("GMAIL_USER", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 GMAIL_ENABLED = bool(GMAIL_USER and GMAIL_APP_PASSWORD)
 
+# === Semaphore SMS Config (for manual follow-ups on unresolved tickets) ===
+SEMAPHORE_API_KEY = os.environ.get("SEMAPHORE_API_KEY", "")
+SEMAPHORE_SENDER_NAME = os.environ.get("SEMAPHORE_SENDER_NAME", "")
+SEMAPHORE_ENABLED = bool(SEMAPHORE_API_KEY)
+
 # === Directories ===
 DATA_DIR = os.environ.get("DATA_DIR") or os.path.join(PROJECT_DIR, "data")
 REPORT_DIR = os.environ.get("REPORT_DIR") or os.path.join(DATA_DIR, "reports")
