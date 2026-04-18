@@ -333,7 +333,7 @@ def save_report(report_data):
 # ENROLLMENT CHECK
 # ============================================================
 
-def run_enrollment_check():
+def run_enrollment_check(notify_if_new_tickets=False):
     """Run enrollment comparison and create tickets for unmatched students."""
     print("\n[Enrollment] Running payment vs enrollment comparison...")
     
@@ -357,6 +357,18 @@ def run_enrollment_check():
         print(f"[Enrollment] Matched: {report['matched']}, Unmatched: {report['unmatched']}")
         if new_tickets:
             print(f"[Enrollment] Created {new_tickets} new enrollment tickets")
+
+        if notify_if_new_tickets and new_tickets:
+            msg = "🚨 *Hourly Enrollment Alert*\n"
+            msg += "━━━━━━━━━━━━━━━━━━\n\n"
+            msg += f"🔴 New unmatched students: {new_tickets}\n"
+            msg += f"💰 Xendit Payments checked: {report['total_payments']}\n"
+            msg += f"✅ Systeme.io Enrollments: {report['total_enrolments']}\n\n"
+            msg += "Latest unmatched students:\n"
+            for student in report.get("unmatched_students", [])[:5]:
+                msg += f"• {student.get('email', 'N/A')} - {student.get('course', 'Unknown')}\n"
+            msg += "\nUse `/tickets` or `/enrollment` to review."
+            send_message(msg)
         
         return report
     except Exception as e:

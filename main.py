@@ -76,6 +76,28 @@ def run_evening_report():
             logger.exception("Could not notify Telegram")
 
 
+def run_hourly_enrollment_watch():
+    logger.info("Running hourly enrollment watch")
+    try:
+        from fb_agent import run_enrollment_check
+        report = run_enrollment_check(notify_if_new_tickets=True)
+        if report:
+            logger.info(
+                "Hourly enrollment watch completed: payments=%s enrolments=%s matched=%s unmatched=%s",
+                report.get("total_payments", 0),
+                report.get("total_enrolments", 0),
+                report.get("matched", 0),
+                report.get("unmatched", 0),
+            )
+    except Exception:
+        logger.exception("Hourly enrollment watch error")
+        try:
+            from telegram_bot import send_message
+            send_message("❌ Error running hourly enrollment watch - check logs")
+        except Exception:
+            logger.exception("Could not notify Telegram")
+
+
 def _next_run_at(hour_pht: int) -> datetime:
     """Return the next UTC datetime corresponding to `hour_pht:00` Philippine time."""
     now_pht = datetime.now(PHT)
@@ -85,15 +107,27 @@ def _next_run_at(hour_pht: int) -> datetime:
     return target
 
 
+def _next_hourly_run() -> datetime:
+    """Return the next top-of-hour datetime in Philippine time."""
+    now_pht = datetime.now(PHT)
+    target = now_pht.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    return target
+
+
 def run_scheduler():
-    """Simple timezone-aware scheduler. Fires report tasks at 7AM and 7PM PHT."""
-    logger.info("Scheduler started (7AM & 7PM Asia/Manila)")
+    """Simple timezone-aware scheduler for reports and enrollment checks."""
+    logger.info("Scheduler started (hourly enrollment watch + 7AM/7PM Asia/Manila reports)")
 
     next_morning = _next_run_at(7)
     next_evening = _next_run_at(19)
+    next_hourly_enrollment = _next_hourly_run()
 
     while not _shutdown_event.is_set():
         now = datetime.now(PHT)
+
+        if now >= next_hourly_enrollment:
+            run_hourly_enrollment_watch()
+            next_hourly_enrollment = _next_hourly_run()
 
         if now >= next_morning:
             run_morning_report()
@@ -116,7 +150,7 @@ def send_startup_message():
             "━━━━━━━━━━━━━━━━━━\n\n"
             "✅ Webhook Server: Running\n"
             "✅ Telegram Listener: Active\n"
-            "✅ Scheduler: 7AM & 7PM reports (PHT)\n"
+            "✅ Scheduler: Hourly enrollment watch + 7AM & 7PM reports (PHT)\n"
             "✅ AI Chat: Ready\n\n"
             f"🕐 Started: {datetime.now(PHT).strftime('%Y-%m-%d %H:%M:%S')} PHT\n\n"
             "💬 Chat with me anytime Boss!\n"
