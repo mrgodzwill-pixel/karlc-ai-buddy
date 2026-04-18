@@ -222,10 +222,21 @@ def get_new_support_emails(days_back=7, limit=20):
     return new_emails
 
 
+def filter_unresolved_support_emails(emails):
+    """Return only support emails that still need attention."""
+    filtered = []
+    for email in emails:
+        ticket_status = str(email.get("ticket_status", "")).strip().lower()
+        if ticket_status == "done":
+            continue
+        filtered.append(email)
+    return filtered
+
+
 def format_support_emails_telegram(emails, title=None):
     """Format recent support emails for Telegram."""
     if title is None:
-        title = f"📬 *Recent Support Emails ({SUPPORT_EMAIL})*"
+        title = f"📬 *Pending Support Emails ({SUPPORT_EMAIL})*"
 
     if not emails:
         return (

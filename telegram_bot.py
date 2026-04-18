@@ -374,6 +374,7 @@ def send_support_emails():
     """Show recent support inbox emails."""
     import gmail_imap
     from support_inbox import (
+        filter_unresolved_support_emails,
         format_support_emails_telegram,
         get_recent_support_emails,
         sync_support_email_tickets,
@@ -399,7 +400,8 @@ def send_support_emails():
         return
 
     emails, _created_tickets = sync_support_email_tickets(emails)
-    send_message(format_support_emails_telegram(emails))
+    actionable_emails = filter_unresolved_support_emails(emails)
+    send_message(format_support_emails_telegram(actionable_emails))
 
 
 def resolve_tickets(ticket_ids):

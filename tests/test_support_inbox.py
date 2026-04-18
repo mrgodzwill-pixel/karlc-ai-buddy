@@ -167,6 +167,29 @@ class SupportInboxTests(unittest.TestCase):
         self.assertIn("Juan Dela Cruz", message)
         self.assertIn("639171234567", message)
 
+    def test_filter_unresolved_support_emails_hides_done_tickets(self):
+        emails = [
+            {
+                "ticket_id": 1,
+                "ticket_status": "pending",
+                "from": "Pending <pending@example.com>",
+            },
+            {
+                "ticket_id": 2,
+                "ticket_status": "done",
+                "from": "Resolved <resolved@example.com>",
+            },
+            {
+                "from": "No Ticket <noticket@example.com>",
+            },
+        ]
+
+        filtered = support_inbox.filter_unresolved_support_emails(emails)
+
+        self.assertEqual(len(filtered), 2)
+        self.assertEqual(filtered[0]["ticket_id"], 1)
+        self.assertEqual(filtered[1]["from"], "No Ticket <noticket@example.com>")
+
 
 if __name__ == "__main__":
     unittest.main()
