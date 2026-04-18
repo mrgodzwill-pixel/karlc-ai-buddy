@@ -32,30 +32,19 @@ def normalize_ph_phone_number(phone_number):
     return digits
 
 
-def _clean_course_label(course_title):
-    title = str(course_title or "").strip()
-    if not title:
-        return "your Karl C course"
-    if len(title) > 40 or re.search(r"-\d{6,}", title):
-        return "your Karl C course"
-    return title
-
-
 def build_followup_message(ticket, contact_name):
     """Build a concise Taglish follow-up message based on ticket type."""
     first_name = (str(contact_name or "").strip().split() or ["Boss"])[0]
-    course_label = _clean_course_label(ticket.get("course_title", ""))
 
     if ticket.get("type") == "enrollment_incomplete":
         return (
-            f"Hi {first_name}, Karl C here. Nareceive namin payment mo for {course_label}, "
-            "pero invalid or incomplete ang email na nagamit sa enrollment. "
-            "Please email us at course@karlcomboy.com with your correct email para ma-activate namin. Salamat!"
+            f"Hi {first_name}, Karl C here. Invalid ang enrollment email mo. "
+            "Email course@karlcomboy.com with your correct email para ma-activate ang access mo. Thanks!"
         )
 
     return (
-        f"Hi {first_name}, Karl C here. May kailangan lang kaming i-confirm sa student concern mo. "
-        "Please email us at course@karlcomboy.com with your correct email and helpful details. Salamat!"
+        f"Hi {first_name}, Karl C here. "
+        "Email course@karlcomboy.com with your correct email and details. Thanks!"
     )
 
 

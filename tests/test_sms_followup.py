@@ -35,7 +35,7 @@ class SMSFollowupTests(unittest.TestCase):
         )
 
         self.assertIn("Juan", message)
-        self.assertIn("MikroTik Hybrid", message)
+        self.assertNotIn("MikroTik Hybrid", message)
         self.assertIn("course@karlcomboy.com", message)
         self.assertIn("correct email", message)
 
