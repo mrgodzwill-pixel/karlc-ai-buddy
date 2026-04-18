@@ -205,6 +205,19 @@ def create_enrollment_ticket(student_name, student_email, course_title, price,
     )
 
 
+def create_support_email_ticket(student_name, student_email, subject, preview="", email_date=""):
+    """Create a ticket for a support inbox email that needs manual handling."""
+    return create_ticket(
+        ticket_type="support_email",
+        student_name=student_name,
+        student_email=student_email,
+        course_title=subject,
+        payment_method="support_email",
+        date_paid=email_date,
+        extra_info=preview,
+    )
+
+
 def resolve_ticket(ticket_id):
     """Mark a ticket as resolved."""
     with file_lock(TICKETS_FILE):
@@ -227,6 +240,22 @@ def get_ticket(ticket_id):
     for ticket in tickets:
         if ticket["id"] == ticket_id:
             return ticket
+    return None
+
+
+def find_matching_ticket(ticket_type, student_email, course_title="", status=None):
+    """Find a ticket by the same matching fields used for duplicate detection."""
+    tickets = _load_tickets()
+    for ticket in tickets:
+        if ticket.get("type") != ticket_type:
+            continue
+        if ticket.get("student_email") != student_email:
+            continue
+        if ticket.get("course_title") != course_title:
+            continue
+        if status and ticket.get("status") != status:
+            continue
+        return ticket
     return None
 
 
@@ -278,6 +307,7 @@ def get_ticket_stats():
         "dm_verified": len([t for t in tickets if t["type"] == "dm_verified" and t["status"] == "pending"]),
         "dm_no_payment": len([t for t in tickets if t["type"] == "dm_no_payment" and t["status"] == "pending"]),
         "enrollment_incomplete": len([t for t in tickets if t["type"] == "enrollment_incomplete" and t["status"] == "pending"]),
+        "support_email": len([t for t in tickets if t["type"] == "support_email" and t["status"] == "pending"]),
     }
 
 
@@ -292,11 +322,13 @@ def format_pending_tickets_telegram():
         "dm_verified": "🟡",
         "dm_no_payment": "🔴",
         "enrollment_incomplete": "🟠",
+        "support_email": "📬",
     }
     type_labels = {
         "dm_verified": "DM - Payment Verified",
         "dm_no_payment": "DM - No Payment Record",
         "enrollment_incomplete": "Paid but Not Enrolled",
+        "support_email": "Support Email",
     }
     
     msg = f"🎫 *Pending Tickets ({len(pending)})*\n"
@@ -309,9 +341,14 @@ def format_pending_tickets_telegram():
         msg += f"   👤 {t['student_name']}\n"
         msg += f"   📧 {t['student_email']}\n"
         if t["course_title"]:
-            msg += f"   📚 {t['course_title']}\n"
+            if t["type"] == "support_email":
+                msg += f"   📝 {t['course_title']}\n"
+            else:
+                msg += f"   📚 {t['course_title']}\n"
         if t["price"]:
             msg += f"   💰 {t['price']}\n"
+        if t["type"] == "support_email" and t.get("extra_info"):
+            msg += f"   💬 {str(t['extra_info'])[:120]}\n"
         followups = t.get("followup_history", [])
         if followups:
             latest = followups[-1]
@@ -343,6 +380,7 @@ def format_pending_tickets_report():
             "dm_verified": "DM ✅",
             "dm_no_payment": "DM ❌",
             "enrollment_incomplete": "Enrollment ⚠️",
+            "support_email": "Support 📬",
         }.get(t["type"], t["type"])
 
         followups = t.get("followup_history", [])

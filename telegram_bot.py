@@ -330,6 +330,7 @@ def send_status():
     msg += f"   🟡 DM Verified: {ticket_stats['dm_verified']}\n"
     msg += f"   🔴 No Payment: {ticket_stats['dm_no_payment']}\n"
     msg += f"   🟠 Enrollment: {ticket_stats['enrollment_incomplete']}\n"
+    msg += f"   📬 Support Email: {ticket_stats['support_email']}\n"
     msg += f"✅ Resolved Tickets: {ticket_stats['done']}\n"
     msg += f"🕐 Time: {datetime.now(PHT).strftime('%Y-%m-%d %H:%M:%S')} PHT\n"
     msg += f"\n📅 Next Reports: 7AM & 7PM daily"
@@ -368,13 +369,18 @@ def send_tickets():
 
 def send_support_emails():
     """Show recent support inbox emails."""
-    from support_inbox import format_support_emails_telegram, get_recent_support_emails
+    from support_inbox import (
+        format_support_emails_telegram,
+        get_recent_support_emails,
+        sync_support_email_tickets,
+    )
 
     emails = get_recent_support_emails(days_back=7, limit=10)
     if emails is None:
         send_message("❌ Gmail support inbox is not configured. Check `GMAIL_USER` and `GMAIL_APP_PASSWORD`.")
         return
 
+    emails, _created_tickets = sync_support_email_tickets(emails)
     send_message(format_support_emails_telegram(emails))
 
 
@@ -475,7 +481,11 @@ def _get_context_info():
     pending = get_pending_tickets()
 
     context = f"\n[Current Time: {datetime.now(PHT).strftime('%Y-%m-%d %H:%M:%S')} PHT]\n"
-    context += f"[Pending Tickets: {stats['pending']} ({stats['dm_verified']} DM verified, {stats['dm_no_payment']} no payment, {stats['enrollment_incomplete']} enrollment)]\n"
+    context += (
+        f"[Pending Tickets: {stats['pending']} "
+        f"({stats['dm_verified']} DM verified, {stats['dm_no_payment']} no payment, "
+        f"{stats['enrollment_incomplete']} enrollment, {stats['support_email']} support email)]\n"
+    )
     context += f"[Resolved Tickets: {stats['done']}]\n"
 
     if pending:

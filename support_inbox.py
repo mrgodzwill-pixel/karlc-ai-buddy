@@ -6,7 +6,7 @@ import hashlib
 import os
 import re
 from datetime import datetime, timedelta, timezone
-from email.utils import parsedate_to_datetime
+from email.utils import parseaddr, parsedate_to_datetime
 
 import gmail_imap
 from config import DATA_DIR, GMAIL_USER, OWNER_EMAIL, SUPPORT_EMAIL, SYSTEME_SENDER
@@ -67,6 +67,15 @@ def _search_queries(days_back=7):
     ]
 
 
+def _parse_sender(from_text):
+    name, email = parseaddr(str(from_text or ""))
+    name = (name or "").strip()
+    email = (email or "").strip().lower()
+    if not name:
+        name = email or str(from_text or "Unknown").strip()
+    return name, email
+
+
 def get_recent_support_emails(days_back=7, limit=10):
     """Return recent emails addressed to the support mailbox."""
     if not gmail_imap.available():
@@ -95,6 +104,47 @@ def get_recent_support_emails(days_back=7, limit=10):
         reverse=True,
     )
     return recent[:limit]
+
+
+def sync_support_email_tickets(emails):
+    """Ensure support emails are represented as actionable tickets."""
+    from ticket_system import (
+        create_support_email_ticket,
+        find_matching_ticket,
+    )
+
+    synced = []
+    created = []
+    for email in emails:
+        name, sender_email = _parse_sender(email.get("from", ""))
+        ticket_key_email = sender_email or str(email.get("from", "")).strip().lower() or "unknown-support-email"
+        subject = str(email.get("subject", "(no subject)")).strip() or "(no subject)"
+        preview = str(email.get("preview", "")).strip()
+        message_date = str(email.get("date", "")).strip()
+
+        ticket = create_support_email_ticket(
+            student_name=name,
+            student_email=ticket_key_email,
+            subject=subject,
+            preview=preview,
+            email_date=message_date,
+        )
+        if ticket:
+            created.append(ticket)
+        else:
+            ticket = find_matching_ticket(
+                "support_email",
+                ticket_key_email,
+                subject,
+                status="pending",
+            )
+
+        updated_email = dict(email)
+        if ticket:
+            updated_email["ticket_id"] = ticket["id"]
+        synced.append(updated_email)
+
+    return synced, created
 
 
 def _load_seen_state():
@@ -146,6 +196,8 @@ def format_support_emails_telegram(emails, title=None):
     for i, email in enumerate(emails, 1):
         timestamp = _parse_date(email.get("date", "")).strftime("%Y-%m-%d %H:%M")
         msg += f"*Email #{i}*\n"
+        if email.get("ticket_id"):
+            msg += f"🎫 Ticket: #{email['ticket_id']}\n"
         msg += f"👤 From: {email.get('from', 'Unknown')[:80]}\n"
         msg += f"📝 Subject: {email.get('subject', '(no subject)')[:80]}\n"
         msg += f"🕐 {timestamp} PHT\n"

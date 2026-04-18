@@ -101,12 +101,17 @@ def run_hourly_enrollment_watch():
 def run_hourly_support_watch():
     logger.info("Running hourly support inbox watch")
     try:
-        from support_inbox import format_support_emails_telegram, get_new_support_emails
+        from support_inbox import (
+            format_support_emails_telegram,
+            get_new_support_emails,
+            sync_support_email_tickets,
+        )
         new_emails = get_new_support_emails(days_back=7, limit=20)
         if new_emails is None:
             logger.info("Support inbox watch skipped - Gmail IMAP not configured")
             return
         if new_emails:
+            new_emails, created_tickets = sync_support_email_tickets(new_emails)
             logger.info("Hourly support inbox watch found %s new email(s)", len(new_emails))
             from telegram_bot import send_message
             send_message(
@@ -115,6 +120,8 @@ def run_hourly_support_watch():
                     title=f"📬 *New Support Emails ({len(new_emails)})*",
                 )
             )
+            if created_tickets:
+                logger.info("Hourly support inbox watch created %s ticket(s)", len(created_tickets))
         else:
             logger.info("Hourly support inbox watch found no new emails")
     except Exception:
