@@ -288,6 +288,7 @@ def send_help():
     msg += "🎫 /tickets - View pending student tickets\n"
     msg += "✅ /done 1 - Mark ticket #1 as resolved\n"
     msg += "✅ /done 1 2 3 - Mark multiple tickets as done\n"
+    msg += "✅ /done all - Mark all pending tickets as done\n"
     msg += "📲 /follow 12 | Juan Dela Cruz | 09171234567 - SMS follow-up\n"
     msg += "📬 /support - View recent emails sent to support inbox\n"
     msg += "📊 /enrollment - Run enrollment comparison now\n"
@@ -421,6 +422,30 @@ def resolve_tickets(ticket_ids):
             msg += f"❌ Ticket #{tid} - Not found\n\n"
 
     msg += "━━━━━━━━━━━━━━━━━━"
+    send_message(msg)
+
+
+def resolve_all_tickets():
+    """Resolve every pending ticket."""
+    from ticket_system import resolve_all_pending_tickets
+
+    resolved = resolve_all_pending_tickets()
+    if not resolved:
+        send_message("✅ Walang pending tickets na kailangan i-resolve.")
+        return
+
+    msg = "🎫 *Bulk Ticket Resolution*\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    msg += f"✅ Resolved {len(resolved)} pending ticket(s)\n\n"
+
+    sample = resolved[:10]
+    for ticket in sample:
+        msg += f"• #{ticket['id']} - {ticket['student_name']} ({ticket['type']})\n"
+
+    remaining = len(resolved) - len(sample)
+    if remaining > 0:
+        msg += f"\n...and {remaining} more."
+
     send_message(msg)
 
 
@@ -669,11 +694,14 @@ def process_message(text):
         return "enrollment"
 
     if tokens and tokens[0] == "/done":
+        if len(tokens) >= 2 and tokens[1] == "all":
+            resolve_all_tickets()
+            return "done_all"
         numbers = [int(p) for p in tokens[1:] if p.isdigit()]
         if numbers:
             resolve_tickets(numbers)
         else:
-            send_message("Usage: /done 1 or /done 1 2 3")
+            send_message("Usage: /done 1 or /done 1 2 3 or /done all")
         return "done"
 
     if text_lower.startswith("/follow"):

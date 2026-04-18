@@ -234,6 +234,31 @@ def resolve_ticket(ticket_id):
         return None, "not_found"
 
 
+def resolve_all_pending_tickets(ticket_type=None):
+    """Resolve every pending ticket, optionally filtered by type."""
+    resolved = []
+
+    with file_lock(TICKETS_FILE):
+        tickets = _load_tickets()
+        for ticket in tickets:
+            if ticket.get("status") != "pending":
+                continue
+            if ticket_type and ticket.get("type") != ticket_type:
+                continue
+
+            ticket["status"] = "done"
+            ticket["resolved_at"] = datetime.now(PHT).isoformat()
+            resolved.append(dict(ticket))
+
+        if resolved:
+            _save_tickets(tickets)
+
+    for ticket in resolved:
+        add_enrollment_resolution(ticket)
+
+    return resolved
+
+
 def get_ticket(ticket_id):
     """Return a ticket by ID."""
     tickets = _load_tickets()
