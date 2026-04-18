@@ -370,15 +370,23 @@ def send_tickets():
 
 def send_support_emails():
     """Show recent support inbox emails."""
+    import gmail_imap
     from support_inbox import (
         format_support_emails_telegram,
         get_recent_support_emails,
         sync_support_email_tickets,
     )
 
+    if not gmail_imap.available():
+        send_message("❌ Gmail support inbox is not configured. Check `GMAIL_USER` and `GMAIL_APP_PASSWORD`.")
+        return
+
     emails = get_recent_support_emails(days_back=7, limit=10)
     if emails is None:
-        send_message("❌ Gmail support inbox is not configured. Check `GMAIL_USER` and `GMAIL_APP_PASSWORD`.")
+        send_message(
+            "❌ Gmail support inbox login/search failed.\n"
+            "Check `GMAIL_USER`, `GMAIL_APP_PASSWORD`, then redeploy Railway."
+        )
         return
 
     emails, _created_tickets = sync_support_email_tickets(emails)
