@@ -98,6 +98,34 @@ def run_hourly_enrollment_watch():
             logger.exception("Could not notify Telegram")
 
 
+def run_hourly_support_watch():
+    logger.info("Running hourly support inbox watch")
+    try:
+        from support_inbox import format_support_emails_telegram, get_new_support_emails
+        new_emails = get_new_support_emails(days_back=7, limit=20)
+        if new_emails is None:
+            logger.info("Support inbox watch skipped - Gmail IMAP not configured")
+            return
+        if new_emails:
+            logger.info("Hourly support inbox watch found %s new email(s)", len(new_emails))
+            from telegram_bot import send_message
+            send_message(
+                format_support_emails_telegram(
+                    new_emails[:5],
+                    title=f"📬 *New Support Emails ({len(new_emails)})*",
+                )
+            )
+        else:
+            logger.info("Hourly support inbox watch found no new emails")
+    except Exception:
+        logger.exception("Hourly support inbox watch error")
+        try:
+            from telegram_bot import send_message
+            send_message("❌ Error running support inbox watch - check logs")
+        except Exception:
+            logger.exception("Could not notify Telegram")
+
+
 def _next_run_at(hour_pht: int) -> datetime:
     """Return the next UTC datetime corresponding to `hour_pht:00` Philippine time."""
     now_pht = datetime.now(PHT)
@@ -116,7 +144,7 @@ def _next_hourly_run() -> datetime:
 
 def run_scheduler():
     """Simple timezone-aware scheduler for reports and enrollment checks."""
-    logger.info("Scheduler started (hourly enrollment watch + 7AM/7PM Asia/Manila reports)")
+    logger.info("Scheduler started (hourly enrollment/support watch + 7AM/7PM Asia/Manila reports)")
 
     next_morning = _next_run_at(7)
     next_evening = _next_run_at(19)
@@ -127,6 +155,7 @@ def run_scheduler():
 
         if now >= next_hourly_enrollment:
             run_hourly_enrollment_watch()
+            run_hourly_support_watch()
             next_hourly_enrollment = _next_hourly_run()
 
         if now >= next_morning:
@@ -150,7 +179,7 @@ def send_startup_message():
             "━━━━━━━━━━━━━━━━━━\n\n"
             "✅ Webhook Server: Running\n"
             "✅ Telegram Listener: Active\n"
-            "✅ Scheduler: Hourly enrollment watch + 7AM & 7PM reports (PHT)\n"
+            "✅ Scheduler: Hourly enrollment + support inbox watch + 7AM & 7PM reports (PHT)\n"
             "✅ AI Chat: Ready\n\n"
             f"🕐 Started: {datetime.now(PHT).strftime('%Y-%m-%d %H:%M:%S')} PHT\n\n"
             "💬 Chat with me anytime Boss!\n"

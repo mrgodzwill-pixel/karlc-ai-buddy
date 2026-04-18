@@ -289,6 +289,7 @@ def send_help():
     msg += "✅ /done 1 - Mark ticket #1 as resolved\n"
     msg += "✅ /done 1 2 3 - Mark multiple tickets as done\n"
     msg += "📲 /follow 12 | Juan Dela Cruz | 09171234567 - SMS follow-up\n"
+    msg += "📬 /support - View recent emails sent to support inbox\n"
     msg += "📊 /enrollment - Run enrollment comparison now\n"
     msg += "🗣️ /chat - Talk to AI Buddy (or just type normally!)\n"
     msg += "❓ /help - Show this help\n"
@@ -363,6 +364,18 @@ def send_tickets():
     msg += f"\n\n📊 *Stats:* {stats['total']} total | {stats['pending']} pending | {stats['done']} resolved"
 
     send_message(msg)
+
+
+def send_support_emails():
+    """Show recent support inbox emails."""
+    from support_inbox import format_support_emails_telegram, get_recent_support_emails
+
+    emails = get_recent_support_emails(days_back=7, limit=10)
+    if emails is None:
+        send_message("❌ Gmail support inbox is not configured. Check `GMAIL_USER` and `GMAIL_APP_PASSWORD`.")
+        return
+
+    send_message(format_support_emails_telegram(emails))
 
 
 def resolve_tickets(ticket_ids):
@@ -596,6 +609,11 @@ def process_message(text):
     if text_lower == "/tickets":
         send_tickets()
         return "tickets"
+
+    if text_lower == "/support":
+        send_message("⏳ Checking support inbox... sandali lang Boss!")
+        send_support_emails()
+        return "support"
 
     # /enrollment command OR natural-language ask ("check enrollments",
     # "enrollment status", "paid but not enrolled", etc.) — both run the check

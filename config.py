@@ -40,6 +40,7 @@ OWNER_EMAIL = os.environ.get("OWNER_EMAIL", "").lower()
 # emails. The enrollment checker searches messages from this sender and extracts
 # the student's email from the body, then matches against Xendit payer emails.
 SYSTEME_SENDER = os.environ.get("SYSTEME_SENDER", "course@karlcomboy.com").lower()
+SUPPORT_EMAIL = os.environ.get("SUPPORT_EMAIL", "course@karlcomboy.com").lower()
 
 # === Gmail IMAP Config (for enrollment checker & Xendit lookups) ===
 # See gmail_imap.py. Enable by setting GMAIL_USER and GMAIL_APP_PASSWORD

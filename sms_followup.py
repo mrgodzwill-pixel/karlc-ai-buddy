@@ -6,7 +6,12 @@ import re
 
 import requests
 
-from config import SEMAPHORE_API_KEY, SEMAPHORE_ENABLED, SEMAPHORE_SENDER_NAME
+from config import (
+    SEMAPHORE_API_KEY,
+    SEMAPHORE_ENABLED,
+    SEMAPHORE_SENDER_NAME,
+    SUPPORT_EMAIL,
+)
 
 SEMAPHORE_MESSAGES_URL = "https://api.semaphore.co/api/v4/messages"
 
@@ -39,12 +44,12 @@ def build_followup_message(ticket, contact_name):
     if ticket.get("type") == "enrollment_incomplete":
         return (
             f"Hi {first_name}, Karl C here. Invalid ang enrollment email mo. "
-            "Email course@karlcomboy.com with your correct email para ma-activate ang access mo. Thanks!"
+            f"Email {SUPPORT_EMAIL} with your correct email para ma-activate ang access mo. Thanks!"
         )
 
     return (
         f"Hi {first_name}, Karl C here. "
-        "Email course@karlcomboy.com with your correct email and details. Thanks!"
+        f"Email {SUPPORT_EMAIL} with your correct email and details. Thanks!"
     )
 
 
