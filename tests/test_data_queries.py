@@ -6,6 +6,7 @@ import types
 import unittest
 from unittest.mock import patch
 
+import systeme_students
 import xendit_payments
 
 if "requests" not in sys.modules:
@@ -49,6 +50,35 @@ class DataQueriesTests(unittest.TestCase):
 
         sync_recent.assert_called_once_with(days_back=30)
         self.assertEqual(result["summary"], "ok")
+
+    def test_build_data_context_includes_systeme_student_lookup(self):
+        payload = {
+            "type": "contact.course.enrolled",
+            "data": {
+                "course": {"id": 44685, "name": "MikroTik OSPF"},
+                "contact": {
+                    "id": 29150265,
+                    "email": "learner@example.com",
+                    "fields": {
+                        "first_name": "Learner",
+                        "surname": "One",
+                    },
+                },
+            },
+            "created_at": "2026-04-21T11:12:29+00:00",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = os.path.join(tmpdir, "systeme_students.json")
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file):
+                systeme_students.upsert_systeme_student(payload)
+                context = data_queries.build_data_context(
+                    "What course is learner@example.com enrolled in sa systeme?"
+                )
+
+        self.assertIn("[SYSTEME STUDENT LOOKUP]", context)
+        self.assertIn("MikroTik OSPF", context)
+        self.assertIn("learner@example.com", context)
 
 
 if __name__ == "__main__":

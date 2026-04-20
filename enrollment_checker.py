@@ -26,6 +26,7 @@ from xendit_payments import (
     sync_payment_records,
 )
 from xendit_sync import sync_recent_invoice_payments
+from systeme_students import list_recent_enrolments as list_recent_systeme_enrolments
 
 PHT = timezone(timedelta(hours=8))
 logger = logging.getLogger(__name__)
@@ -246,24 +247,40 @@ def compare_payments_vs_enrolments(days_back=7):
             if missing_email_subjects:
                 print(f"[Enrollment] Sample paid-like Xendit subjects missing payer email: {missing_email_subjects}")
 
-    # Search enrollment / verification emails from Systeme.io.
-    # Default sender is course@karlcomboy.com (configurable via SYSTEME_SENDER).
-    enrolment_msgs = _search_enrolment_messages(days_back=days_back)
-    if enrolment_msgs is None:
-        enrolment_msgs = []
-
     enrolments = []
     seen_emails = set()
-    for m in enrolment_msgs:
-        student_email = _extract_enrolment_email(m.get("body", ""))
-        if not student_email or student_email in seen_emails:
-            continue
-        seen_emails.add(student_email)
-        enrolments.append({
-            "email": student_email,
-            "date": m.get("date", ""),
-            "subject": m.get("subject", ""),
-        })
+    direct_enrolments = list_recent_systeme_enrolments(days_back=days_back)
+    if direct_enrolments:
+        print(f"[Enrollment] Direct Systeme store has {len(direct_enrolments)} recent enrolment record(s)")
+        for entry in direct_enrolments:
+            student_email = str(entry.get("email") or "").strip().lower()
+            if not student_email or student_email in seen_emails:
+                continue
+            seen_emails.add(student_email)
+            enrolments.append(
+                {
+                    "email": student_email,
+                    "date": entry.get("date", ""),
+                    "subject": entry.get("course", ""),
+                }
+            )
+    else:
+        # Search enrollment / verification emails from Systeme.io.
+        # Default sender is course@karlcomboy.com (configurable via SYSTEME_SENDER).
+        enrolment_msgs = _search_enrolment_messages(days_back=days_back)
+        if enrolment_msgs is None:
+            enrolment_msgs = []
+
+        for m in enrolment_msgs:
+            student_email = _extract_enrolment_email(m.get("body", ""))
+            if not student_email or student_email in seen_emails:
+                continue
+            seen_emails.add(student_email)
+            enrolments.append({
+                "email": student_email,
+                "date": m.get("date", ""),
+                "subject": m.get("subject", ""),
+            })
 
     print(f"[Enrollment] Found {len(enrolments)} enrolment confirmations")
 

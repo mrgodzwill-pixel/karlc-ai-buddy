@@ -19,6 +19,7 @@ from xendit_payments import (
     load_payment_store,
 )
 from xendit_sync import sync_recent_invoice_payments
+from systeme_students import format_student_lookup_summary
 
 PHT = timezone(timedelta(hours=8))
 
@@ -290,6 +291,11 @@ def get_payment_lookup(user_message, limit=5):
     return format_payment_lookup_summary(user_message, limit=limit)
 
 
+def get_systeme_student_lookup(user_message, limit=5):
+    """Search stored Systeme students by name/email/phone."""
+    return format_student_lookup_summary(user_message, limit=limit)
+
+
 # ============================================================
 # MASTER QUERY - Detects what data Karl is asking about
 # ============================================================
@@ -373,6 +379,17 @@ def build_data_context(user_message):
         payment_lookup_criteria.get("phones"),
         payment_lookup_criteria.get("names"),
     ])
+    asking_specific_student_lookup = any([
+        payment_lookup_criteria.get("emails"),
+        payment_lookup_criteria.get("phones"),
+        payment_lookup_criteria.get("names"),
+    ]) and any(
+        kw in msg_lower
+        for kw in [
+            "systeme", "student", "students", "course", "courses",
+            "enroll", "enrolled", "enrollment", "member", "membership",
+        ]
+    )
 
     # Fetch requested data
     if asking_messages or asking_general:
@@ -390,6 +407,10 @@ def build_data_context(user_message):
     if asking_specific_payment_lookup:
         payment_lookup = get_payment_lookup(user_message)
         context_parts.append(f"\n[PAYMENT LOOKUP]\n{payment_lookup['summary']}")
+
+    if asking_specific_student_lookup:
+        student_lookup = get_systeme_student_lookup(user_message)
+        context_parts.append(f"\n[SYSTEME STUDENT LOOKUP]\n{student_lookup['summary']}")
 
     if asking_vpn:
         context_parts.append(
