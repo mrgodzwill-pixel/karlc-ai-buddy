@@ -22,6 +22,7 @@ from config import (
     FB_APP_SECRET,
     DATA_DIR,
     PAGE_ID,
+    SYSTEME_AUTOMATION_TOKEN,
     SYSTEME_WEBHOOK_SECRET,
     XENDIT_INVOICE_WEBHOOK_TOKEN,
     XENDIT_PAYMENT_WEBHOOK_TOKEN,
@@ -197,6 +198,16 @@ def _verify_systeme_signature(expected_secret: str) -> bool:
         if hmac.compare_digest(signature, expected):
             return True
     return False
+
+
+def _verify_systeme_automation_token(expected_token: str) -> bool:
+    if not expected_token:
+        logger.error("Systeme automation token is not configured - rejecting webhook")
+        return False
+    received = request.args.get("token", "")
+    if not received:
+        return False
+    return hmac.compare_digest(received, expected_token)
 
 
 def _xendit_webhook_key(payload, fallback_event="xendit"):
@@ -503,6 +514,29 @@ def handle_systeme_webhook():
         _mark_processed_systeme(webhook_key)
     except Exception as e:
         logger.exception("Systeme webhook handler error")
+        _notify_systeme_webhook_failure(webhook_key, e)
+        return "Webhook processing failed", 500
+    return "OK", 200
+
+
+@app.route("/webhook/systeme/automation", methods=["POST"])
+def handle_systeme_automation_webhook():
+    """Handle Systeme automation/workflow webhooks protected by a query token."""
+    if not _verify_systeme_automation_token(SYSTEME_AUTOMATION_TOKEN):
+        logger.warning("Invalid Systeme automation token")
+        abort(403)
+
+    payload = request.get_json(silent=True) or {}
+    webhook_key = _systeme_webhook_key(payload, fallback_event="systeme_automation")
+    if _already_processed_systeme(webhook_key):
+        logger.info("Skipping already-processed Systeme automation webhook %s", webhook_key)
+        return "OK", 200
+
+    try:
+        _process_systeme_webhook(payload, webhook_key)
+        _mark_processed_systeme(webhook_key)
+    except Exception as e:
+        logger.exception("Systeme automation webhook handler error")
         _notify_systeme_webhook_failure(webhook_key, e)
         return "Webhook processing failed", 500
     return "OK", 200

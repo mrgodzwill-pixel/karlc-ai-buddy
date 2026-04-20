@@ -94,6 +94,33 @@ class WebhookServerSystemeTests(unittest.TestCase):
 
         self.assertEqual(str(raised.exception), "abort:403")
 
+    def test_systeme_automation_webhook_uses_query_token(self):
+        payload = {"type": "contact.course.enrolled", "data": {"contact": {"email": "john@example.com"}}}
+        raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        calls = []
+
+        request_stub = types.SimpleNamespace(
+            headers={},
+            args={"token": "automation-secret"},
+            get_json=lambda silent=True: payload,
+            get_data=lambda: raw_body,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_file = os.path.join(tmpdir, "processed_systeme_webhooks.json")
+            with patch.object(webhook_server, "request", request_stub), patch.object(
+                webhook_server, "SYSTEME_AUTOMATION_TOKEN", "automation-secret"
+            ), patch.object(
+                webhook_server, "PROCESSED_SYSTEME_WEBHOOKS_FILE", processed_file
+            ), patch(
+                "webhook_server._process_systeme_webhook",
+                side_effect=lambda payload, webhook_key: calls.append((payload, webhook_key)),
+            ):
+                result = webhook_server.handle_systeme_automation_webhook()
+
+        self.assertEqual(result, ("OK", 200))
+        self.assertEqual(len(calls), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
