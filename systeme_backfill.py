@@ -243,6 +243,80 @@ def _contact_snapshot(contact):
     }
 
 
+def _parse_sortable_timestamp(value):
+    text = _string(value)
+    if not text:
+        return ""
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).isoformat()
+    except Exception:
+        return text
+
+
+def _merge_course_entries(existing_courses, new_courses):
+    merged = [dict(course) for course in existing_courses or [] if isinstance(course, dict)]
+    index = {}
+    for idx, course in enumerate(merged):
+        key = (_lower(course.get("name")), _lower(course.get("kind")))
+        index[key] = idx
+
+    status_rank = {"sold": 1, "enrolled": 2}
+
+    for course in new_courses or []:
+        if not isinstance(course, dict):
+            continue
+        key = (_lower(course.get("name")), _lower(course.get("kind")))
+        existing_idx = index.get(key)
+        if existing_idx is None:
+            merged.append(dict(course))
+            index[key] = len(merged) - 1
+            continue
+
+        current = merged[existing_idx]
+        if status_rank.get(_lower(course.get("status")), 0) >= status_rank.get(_lower(current.get("status")), 0):
+            current["status"] = course.get("status", current.get("status", ""))
+        if _parse_sortable_timestamp(course.get("date")) >= _parse_sortable_timestamp(current.get("date")):
+            current["date"] = course.get("date", current.get("date", ""))
+            current["source_event"] = course.get("source_event", current.get("source_event", ""))
+        if course.get("id") and not current.get("id"):
+            current["id"] = course.get("id")
+
+    return merged
+
+
+def _merge_snapshot(existing, incoming):
+    if existing is None:
+        return dict(incoming)
+
+    merged = dict(existing)
+    merged["contact_id"] = merged.get("contact_id") or incoming.get("contact_id", "")
+    merged["name"] = merged.get("name") or incoming.get("name", "")
+    merged["first_name"] = merged.get("first_name") or incoming.get("first_name", "")
+    merged["surname"] = merged.get("surname") or incoming.get("surname", "")
+    merged["phone"] = merged.get("phone") or incoming.get("phone", "")
+    merged["fields"] = {**incoming.get("fields", {}), **merged.get("fields", {})}
+
+    tags = list(merged.get("tags", []))
+    for tag in incoming.get("tags", []):
+        if tag not in tags:
+            tags.append(tag)
+    merged["tags"] = tags
+
+    merged["courses"] = _merge_course_entries(merged.get("courses", []), incoming.get("courses", []))
+    merged["sales"] = list(merged.get("sales", [])) or list(incoming.get("sales", []))
+
+    existing_last = _parse_sortable_timestamp(merged.get("last_event_at"))
+    incoming_last = _parse_sortable_timestamp(incoming.get("last_event_at"))
+    if incoming_last >= existing_last:
+        merged["last_event_at"] = incoming.get("last_event_at", merged.get("last_event_at", ""))
+
+    full_name = " ".join(part for part in [merged.get("first_name", ""), merged.get("surname", "")] if _string(part))
+    if full_name:
+        merged["name"] = full_name
+
+    return merged
+
+
 def _tag_course_mapping():
     mapping = {}
 
@@ -339,7 +413,7 @@ def _find_snapshot(snapshots, *, email="", contact_id=""):
     return None
 
 
-def run_systeme_backfill(contact_limit=100, contact_max_pages=50, enrollment_limit=100, enrollment_max_pages=50):
+def run_systeme_backfill(contact_limit=100, contact_max_pages=200, enrollment_limit=100, enrollment_max_pages=200):
     """Import historical enrolled students from Systeme.io Public API."""
     if not systeme_api.available():
         return {
@@ -382,7 +456,7 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=50, enrollment_lim
         if tag_courses:
             snapshot["courses"] = tag_courses
             tagged_contacts += 1
-        snapshots[snapshot["email"]] = snapshot
+        snapshots[snapshot["email"]] = _merge_snapshot(snapshots.get(snapshot["email"]), snapshot)
         if snapshot.get("contact_id"):
             contact_lookup[_string(snapshot["contact_id"])] = contact
 
@@ -422,7 +496,8 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=50, enrollment_lim
                 "sales": [],
                 "last_event_at": _extract_timestamp(enrollment) or _now_iso(),
             }
-            snapshots[email] = snapshot
+            snapshots[email] = _merge_snapshot(snapshots.get(email), snapshot)
+            snapshot = snapshots[email]
 
         course = _course_entry(enrollment, course_lookup)
         if course:
@@ -457,4 +532,6 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=50, enrollment_lim
         "contacts_with_course_tags": tagged_contacts,
         "students_imported": imported_students,
         "skipped_without_email": skipped_without_email,
+        "hit_contact_page_cap": len(contacts) >= contact_limit * contact_max_pages,
+        "hit_enrollment_page_cap": len(enrollments) >= enrollment_limit * enrollment_max_pages,
     }

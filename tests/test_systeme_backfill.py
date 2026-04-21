@@ -152,6 +152,43 @@ class SystemeBackfillTests(unittest.TestCase):
             "New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)",
         )
 
+    def test_run_systeme_backfill_merges_duplicate_contacts_by_email(self):
+        contacts = [
+            {
+                "id": 10,
+                "email": "juan@example.com",
+                "fields": {"first_name": "Juan"},
+                "tags": [{"id": 1, "name": "QUICKSTART_PAID"}],
+            },
+            {
+                "id": 11,
+                "email": "juan@example.com",
+                "fields": {"surname": "Dela Cruz"},
+                "tags": [{"id": 2, "name": "XENDIT_DUAL_PAID"}],
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = os.path.join(tmpdir, "systeme_students.json")
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file), patch(
+                "systeme_backfill.systeme_api.available", return_value=True
+            ), patch(
+                "systeme_backfill.systeme_api.list_courses", return_value=[]
+            ), patch(
+                "systeme_backfill.systeme_api.list_contacts", return_value=contacts
+            ), patch(
+                "systeme_backfill.systeme_api.list_enrollments", return_value=[]
+            ):
+                result = systeme_backfill.run_systeme_backfill()
+                store = systeme_students.load_student_store()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["students_imported"], 1)
+        self.assertEqual(store["students"][0]["name"], "Juan Dela Cruz")
+        course_names = {course["name"] for course in store["students"][0]["courses"]}
+        self.assertIn("MikroTik QuickStart: Configure From Scratch", course_names)
+        self.assertIn("New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)", course_names)
+
 
 if __name__ == "__main__":
     unittest.main()

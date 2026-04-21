@@ -440,6 +440,8 @@ def send_systeme_backfill():
     if result.get("contacts_with_course_tags", 0):
         msg += f"🏷️ Contacts with paid-course tags: {result.get('contacts_with_course_tags', 0)}\n"
     msg += f"✅ Students imported/updated: {result.get('students_imported', 0)}\n"
+    if result.get("hit_contact_page_cap") or result.get("hit_enrollment_page_cap"):
+        msg += "\n⚠️ Sync may still be hitting an API page cap.\n"
     if result.get("skipped_without_email", 0):
         msg += f"⚠️ Skipped without email: {result.get('skipped_without_email', 0)}\n"
     msg += "\nTry `/students` or ask me about a student/course right away."
