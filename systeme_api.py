@@ -217,6 +217,10 @@ def list_enrollments(limit=100, max_pages=50, timeout=20):
     return _list_collection("/school/enrollments", limit=limit, max_pages=max_pages, timeout=timeout)
 
 
+def list_tags(limit=100, max_pages=20, timeout=20):
+    return _list_collection("/tags", limit=limit, max_pages=max_pages, timeout=timeout)
+
+
 def _coerce_id(value):
     if value in (None, ""):
         return ""
@@ -352,3 +356,56 @@ def create_enrollment(contact_id, course_id, timeout=20):
         raise last_error
 
     return None
+
+
+def find_tag_by_name(tag_name, timeout=20):
+    normalized = str(tag_name or "").strip().lower()
+    if not normalized:
+        return None
+
+    tags = list_tags(timeout=timeout) or []
+    exact = None
+    partial = []
+    for tag in tags:
+        if not isinstance(tag, dict):
+            continue
+        name = str(tag.get("name") or "").strip()
+        if not name:
+            continue
+        lowered = name.lower()
+        if lowered == normalized:
+            exact = tag
+            break
+        if normalized in lowered or lowered in normalized:
+            partial.append(tag)
+
+    return exact or (partial[0] if partial else None)
+
+
+def create_tag(name, timeout=20):
+    name = str(name or "").strip()
+    if not name:
+        raise ValueError("Tag name is required")
+
+    existing = find_tag_by_name(name, timeout=timeout)
+    if existing:
+        return existing
+
+    created = _request("POST", "/tags", json_body={"name": name}, timeout=timeout)
+    if isinstance(created, dict):
+        return created
+    return None
+
+
+def assign_tag_to_contact(contact_id, tag_id, timeout=20):
+    contact_id = _coerce_id(contact_id)
+    tag_id = _coerce_id(tag_id)
+    if not contact_id or not tag_id:
+        raise ValueError("Both contact_id and tag_id are required")
+
+    return _request(
+        "POST",
+        f"/contacts/{contact_id}/tags",
+        json_body={"tagId": int(tag_id) if str(tag_id).isdigit() else tag_id},
+        timeout=timeout,
+    )

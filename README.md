@@ -116,7 +116,7 @@ The app verifies `x-callback-token` against your configured webhook token and st
 | `/enrollment` | Run enrollment check (prefers Xendit API, falls back to Gmail IMAP) |
 | `/systeme_sync` | Import older enrolled students from Systeme.io Public API |
 | `/systeme_add 12` | Create a Systeme contact from ticket #12 |
-| `/systeme_enroll 12` | Create/add contact then enroll ticket #12 in Systeme |
+| `/systeme_enroll 12` | Create/add contact then assign the course tag for ticket #12 in Systeme |
 | `/approve_all` | Approve all suggested replies |
 | `/status` | Check agent status |
 | Or just chat naturally! | AI-powered conversation |

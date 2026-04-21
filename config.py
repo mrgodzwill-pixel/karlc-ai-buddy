@@ -45,6 +45,14 @@ SYSTEME_WEBHOOK_SECRET = os.environ.get("SYSTEME_WEBHOOK_SECRET", "")
 SYSTEME_AUTOMATION_TOKEN = os.environ.get("SYSTEME_AUTOMATION_TOKEN", "")
 SYSTEME_API_KEY = os.environ.get("SYSTEME_API_KEY", "")
 SYSTEME_API_BASE_URL = os.environ.get("SYSTEME_API_BASE_URL", "https://api.systeme.io/api")
+SYSTEME_TAG_MIKROTIK_BASIC = os.environ.get("SYSTEME_TAG_MIKROTIK_BASIC", "")
+SYSTEME_TAG_MIKROTIK_DUAL_ISP = os.environ.get("SYSTEME_TAG_MIKROTIK_DUAL_ISP", "")
+SYSTEME_TAG_MIKROTIK_HYBRID = os.environ.get("SYSTEME_TAG_MIKROTIK_HYBRID", "")
+SYSTEME_TAG_MIKROTIK_TRAFFIC = os.environ.get("SYSTEME_TAG_MIKROTIK_TRAFFIC", "")
+SYSTEME_TAG_MIKROTIK_10G = os.environ.get("SYSTEME_TAG_MIKROTIK_10G", "")
+SYSTEME_TAG_MIKROTIK_OSPF = os.environ.get("SYSTEME_TAG_MIKROTIK_OSPF", "")
+SYSTEME_TAG_FTTH = os.environ.get("SYSTEME_TAG_FTTH", "")
+SYSTEME_TAG_SOLAR = os.environ.get("SYSTEME_TAG_SOLAR", "")
 
 # === Gmail IMAP Config (for enrollment checker & Xendit lookups) ===
 # See gmail_imap.py. Enable by setting GMAIL_USER and GMAIL_APP_PASSWORD

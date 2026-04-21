@@ -108,6 +108,22 @@ class SystemeAPITests(unittest.TestCase):
         self.assertEqual(enrollment["id"], 999)
         self.assertEqual(len(calls), 2)
 
+    def test_assign_tag_to_contact_uses_documented_path_and_body(self):
+        calls = []
+
+        def fake_request(method, url, params=None, headers=None, timeout=None, json=None):
+            calls.append({"method": method, "url": url, "json": json})
+            return _FakeResponse(204, {})
+
+        with patch.object(systeme_api, "SYSTEME_API_KEY", "test-key"), patch.object(
+            systeme_api, "_AUTH_MODE_CACHE", "x_api_key_header"
+        ), patch("systeme_api.requests.request", side_effect=fake_request):
+            systeme_api.assign_tag_to_contact("10", "20")
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0]["url"].endswith("/contacts/10/tags"))
+        self.assertEqual(calls[0]["json"], {"tagId": 20})
+
 
 if __name__ == "__main__":
     unittest.main()

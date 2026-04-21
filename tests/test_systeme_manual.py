@@ -43,7 +43,7 @@ class SystemeManualTests(unittest.TestCase):
             "course_title": "MikroTik Hybrid",
         }
         contact = {"id": 501, "email": "juan@example.com"}
-        courses = [{"id": 33, "name": "MikroTik Hybrid"}]
+        tag = {"id": 33, "name": "MikroTik Hybrid"}
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store_file = os.path.join(tmpdir, "systeme_students.json")
@@ -54,9 +54,9 @@ class SystemeManualTests(unittest.TestCase):
             ), patch(
                 "systeme_manual.systeme_api.create_contact", return_value=contact
             ), patch(
-                "systeme_manual.systeme_api.list_courses", return_value=courses
+                "systeme_manual.systeme_api.find_tag_by_name", return_value=tag
             ), patch(
-                "systeme_manual.systeme_api.create_enrollment", return_value={"id": 99}
+                "systeme_manual.systeme_api.assign_tag_to_contact", return_value={}
             ), patch(
                 "systeme_manual.resolve_ticket", return_value=(dict(ticket, status="done"), "resolved")
             ) as resolve_ticket:
@@ -64,9 +64,9 @@ class SystemeManualTests(unittest.TestCase):
                 store = systeme_students.load_student_store()
 
         resolve_ticket.assert_called_once_with(15)
-        self.assertFalse(result["already_enrolled"])
+        self.assertEqual(result["tag"]["name"], "MikroTik Hybrid")
         self.assertEqual(store["students"][0]["courses"][0]["name"], "MikroTik Hybrid")
-        self.assertEqual(store["students"][0]["courses"][0]["status"], "enrolled")
+        self.assertEqual(store["students"][0]["courses"][0]["status"], "sold")
 
 
 if __name__ == "__main__":

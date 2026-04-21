@@ -6,7 +6,17 @@ import re
 from datetime import datetime, timezone
 
 import systeme_api
-from config import COURSES
+from config import (
+    COURSES,
+    SYSTEME_TAG_MIKROTIK_BASIC,
+    SYSTEME_TAG_MIKROTIK_DUAL_ISP,
+    SYSTEME_TAG_MIKROTIK_HYBRID,
+    SYSTEME_TAG_MIKROTIK_TRAFFIC,
+    SYSTEME_TAG_MIKROTIK_10G,
+    SYSTEME_TAG_MIKROTIK_OSPF,
+    SYSTEME_TAG_FTTH,
+    SYSTEME_TAG_SOLAR,
+)
 from systeme_students import upsert_systeme_student_snapshot
 from ticket_system import get_ticket, resolve_ticket
 
@@ -58,6 +68,45 @@ def _course_aliases():
             if normalized and normalized not in aliases:
                 aliases[normalized] = canonical
     return aliases
+
+
+def _course_key_from_query(course_query):
+    query = _normalize(course_query)
+    if not query:
+        return ""
+
+    aliases = _course_aliases()
+    canonical = aliases.get(query, "")
+    if canonical:
+        for course_key, course in COURSES.items():
+            if _normalize(course.get("name")) == _normalize(canonical):
+                return course_key
+
+    for course_key, course in COURSES.items():
+        canonical_name = _normalize(course.get("name"))
+        if query == canonical_name or query in canonical_name:
+            return course_key
+        keywords = [_normalize(keyword) for keyword in course.get("keywords", [])]
+        if query in keywords:
+            return course_key
+        if any(query in keyword for keyword in keywords):
+            return course_key
+
+    return ""
+
+
+def _configured_tag_name(course_key):
+    env_map = {
+        "mikrotik_basic": SYSTEME_TAG_MIKROTIK_BASIC,
+        "mikrotik_dual_isp": SYSTEME_TAG_MIKROTIK_DUAL_ISP,
+        "mikrotik_hybrid": SYSTEME_TAG_MIKROTIK_HYBRID,
+        "mikrotik_traffic": SYSTEME_TAG_MIKROTIK_TRAFFIC,
+        "mikrotik_10g": SYSTEME_TAG_MIKROTIK_10G,
+        "mikrotik_ospf": SYSTEME_TAG_MIKROTIK_OSPF,
+        "ftth": SYSTEME_TAG_FTTH,
+        "solar": SYSTEME_TAG_SOLAR,
+    }
+    return str(env_map.get(course_key) or "").strip()
 
 
 def _match_course(course_query, api_courses):
@@ -115,6 +164,42 @@ def _match_course(course_query, api_courses):
     raise ValueError(
         "Could not match that course in Systeme. "
         f"Sample available courses: {available}"
+    )
+
+
+def _resolve_tag_for_course(course_query):
+    course_query = str(course_query or "").strip()
+    if not course_query:
+        raise ValueError("Course is required.")
+
+    course_key = _course_key_from_query(course_query)
+    configured = _configured_tag_name(course_key) if course_key else ""
+    candidate_names = []
+    if configured:
+        candidate_names.append(configured)
+    candidate_names.append(course_query)
+    if course_key:
+        course_name = str(COURSES.get(course_key, {}).get("name") or "").strip()
+        if course_name:
+            candidate_names.append(course_name)
+
+    seen = set()
+    for candidate in candidate_names:
+        normalized = _normalize(candidate)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        tag = systeme_api.find_tag_by_name(candidate)
+        if tag:
+            return tag, candidate
+
+    expected = configured or course_query
+    created = systeme_api.create_tag(expected)
+    if created:
+        return created, expected
+
+    raise RuntimeError(
+        "Could not find or create the Systeme tag needed for that course."
     )
 
 
@@ -223,41 +308,29 @@ def enroll_student(email="", course_query="", name="", phone_number="", ticket_i
     if not isinstance(contact, dict):
         raise RuntimeError("Systeme contact lookup/creation failed.")
 
-    courses = systeme_api.list_courses(limit=100, max_pages=20) or []
-    matched_course = _match_course(course_query, courses)
-    course_id = _coerce_id(matched_course.get("id"))
-    if not course_id:
-        raise RuntimeError("Matched Systeme course has no usable ID.")
+    tag, expected_tag_name = _resolve_tag_for_course(course_query)
+    tag_id = _coerce_id(tag.get("id"))
+    if not tag_id:
+        raise RuntimeError("Matched Systeme tag has no usable ID.")
 
-    enrollment = None
-    already_enrolled = False
-    try:
-        enrollment = systeme_api.create_enrollment(_coerce_id(contact.get("id")), course_id)
-    except systeme_api.SystemeAPIRequestError as exc:
-        text = str(exc).lower()
-        if exc.status_code == 409 or "already" in text or "exists" in text or "duplicate" in text:
-            already_enrolled = True
-        else:
-            raise
+    tag_assignment = systeme_api.assign_tag_to_contact(_coerce_id(contact.get("id")), tag_id)
 
     course_entry = {
-        "id": course_id,
-        "name": str(matched_course.get("name") or matched_course.get("title") or course_query).strip(),
+        "id": "",
+        "name": str(course_query).strip(),
         "kind": "course",
-        "status": "enrolled",
-        "date": (
-            str((enrollment or {}).get("created_at") or (enrollment or {}).get("createdAt") or _now_iso()).strip()
-        ),
-        "source_event": "manual.enrollment_created" if not already_enrolled else "manual.enrollment_existing",
+        "status": "sold",
+        "date": _now_iso(),
+        "source_event": "manual.tag_assigned",
     }
     snapshot = _snapshot_from_contact(
         contact,
         name=full_name,
         phone_number=phone_number,
         courses=[course_entry],
-        event_type=course_entry["source_event"],
+        event_type="manual.tag_assigned",
     )
-    upsert_systeme_student_snapshot(snapshot, source_event=course_entry["source_event"], event_timestamp=course_entry["date"])
+    upsert_systeme_student_snapshot(snapshot, source_event="manual.tag_assigned", event_timestamp=course_entry["date"])
 
     resolved = None
     if ticket and resolve_ticket_on_success:
@@ -265,9 +338,10 @@ def enroll_student(email="", course_query="", name="", phone_number="", ticket_i
 
     return {
         "contact": contact,
-        "course": matched_course,
-        "enrollment": enrollment or {},
-        "already_enrolled": already_enrolled,
+        "course": {"name": course_query},
+        "tag": tag,
+        "tag_assignment": tag_assignment or {},
+        "expected_tag_name": expected_tag_name,
         "email": email,
         "name": full_name or email,
         "phone_number": phone_number,

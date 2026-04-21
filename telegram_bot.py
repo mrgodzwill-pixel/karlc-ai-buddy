@@ -298,7 +298,7 @@ def send_help():
     msg += "📥 /systeme\\_sync - Import old enrolled students from Systeme API\n"
     msg += "📇 /systeme\\_add 12 - Create a Systeme contact from a ticket\n"
     msg += "📇 /systeme\\_add juan@example.com | Juan Dela Cruz | 09171234567\n"
-    msg += "🎓 /systeme\\_enroll 12 - Create/add contact then enroll from a ticket\n"
+    msg += "🎓 /systeme\\_enroll 12 - Create/add contact then assign course tag from a ticket\n"
     msg += "🎓 /systeme\\_enroll juan@example.com | MikroTik Hybrid | Juan Dela Cruz | 09171234567\n"
     msg += "🗣️ /chat - Talk to AI Buddy (or just type normally!)\n"
     msg += "❓ /help - Show this help\n"
@@ -532,7 +532,7 @@ def send_systeme_manual_contact(ticket_id=None, email="", name="", phone_number=
 
 
 def send_systeme_manual_enrollment(ticket_id=None, email="", course_query="", name="", phone_number=""):
-    """Create contact if needed, enroll student in Systeme, and resolve ticket if applicable."""
+    """Create contact if needed, assign enrollment tag, and resolve ticket if applicable."""
     from systeme_manual import enroll_student
 
     result = enroll_student(
@@ -545,23 +545,24 @@ def send_systeme_manual_enrollment(ticket_id=None, email="", course_query="", na
     )
     contact = result["contact"]
     course = result["course"]
-    msg = "🎓 *Systeme Enrollment Complete*\n"
+    tag = result.get("tag", {})
+    msg = "🎓 *Systeme Enrollment Triggered*\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
     if result.get("ticket_id"):
         msg += f"🎫 Ticket #{result['ticket_id']}\n"
     msg += f"👤 {result.get('name') or result.get('email')}\n"
     msg += f"📧 {result.get('email')}\n"
     msg += f"📚 {course.get('name') or course_query}\n"
+    if tag.get("name"):
+        msg += f"🏷️ Tag: {tag.get('name')}\n"
     if result.get("phone_number"):
         msg += f"📱 {result.get('phone_number')}\n"
     if contact.get("id") not in (None, ""):
         msg += f"🆔 Contact ID: {contact.get('id')}\n"
-    if course.get("id") not in (None, ""):
-        msg += f"🆔 Course ID: {course.get('id')}\n"
-    if result.get("already_enrolled"):
-        msg += "\nℹ️ Student was already enrolled in Systeme. Local store was refreshed anyway."
-    else:
-        msg += "\n✅ Student is now enrolled in Systeme."
+    if tag.get("id") not in (None, ""):
+        msg += f"🆔 Tag ID: {tag.get('id')}\n"
+    msg += "\n✅ Contact was tagged in Systeme."
+    msg += "\n⚙️ Your Systeme automation should do the actual enrollment next."
     if result.get("ticket_id"):
         msg += "\n✅ Related pending ticket was marked resolved."
     send_message(msg)
