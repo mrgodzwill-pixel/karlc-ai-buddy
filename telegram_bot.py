@@ -433,15 +433,19 @@ def _format_systeme_backfill_result(result):
 
     msg = "📥 *Systeme API Backfill Complete*\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
-    msg += f"👥 Contacts scanned: {result.get('contacts_scanned', 0)}\n"
-    msg += f"📚 Courses scanned: {result.get('courses_scanned', 0)}\n"
-    msg += f"🎓 Enrollments scanned: {result.get('enrollments_scanned', 0)}\n"
+    msg += f"👥 Raw contacts fetched: {result.get('contacts_scanned', 0)}\n"
+    msg += f"📚 Courses scanned via API: {result.get('courses_scanned', 0)}\n"
+    msg += f"🎓 Raw enrollments fetched: {result.get('enrollments_scanned', 0)}\n"
     msg += f"🔗 Enrollments linked: {result.get('enrollments_linked', 0)}\n"
+    if result.get("student_snapshots", 0):
+        msg += f"🧾 Unique student emails merged: {result.get('student_snapshots', 0)}\n"
     if result.get("contacts_with_course_tags", 0):
-        msg += f"🏷️ Contacts with paid-course tags: {result.get('contacts_with_course_tags', 0)}\n"
-    msg += f"✅ Students imported/updated: {result.get('students_imported', 0)}\n"
+        msg += f"🏷️ Unique contacts with paid tags: {result.get('contacts_with_course_tags', 0)}\n"
+    if result.get("bundle_contacts_with_course_tags", 0):
+        msg += f"📦 Unique contacts with bundle tags: {result.get('bundle_contacts_with_course_tags', 0)}\n"
+    msg += f"✅ Unique students imported/updated: {result.get('students_imported', 0)}\n"
     if result.get("hit_contact_page_cap") or result.get("hit_enrollment_page_cap"):
-        msg += "\n⚠️ Sync may still be hitting an API page cap.\n"
+        msg += "\n⚠️ Raw fetch hit the current safety cap, so these raw counts are not the real total yet.\n"
     if result.get("skipped_without_email", 0):
         msg += f"⚠️ Skipped without email: {result.get('skipped_without_email', 0)}\n"
     msg += "\nTry `/students` or ask me about a student/course right away."

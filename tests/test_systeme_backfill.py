@@ -152,6 +152,50 @@ class SystemeBackfillTests(unittest.TestCase):
             "New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)",
         )
 
+    def test_run_systeme_backfill_counts_bundle_tagged_contacts_uniquely(self):
+        contacts = [
+            {
+                "id": 10,
+                "email": "juan@example.com",
+                "fields": {
+                    "first_name": "Juan",
+                    "surname": "Dela Cruz",
+                },
+                "tags": [
+                    {"id": 900, "name": "BUNDLE4_PAID"},
+                ],
+            },
+            {
+                "id": 11,
+                "email": "juan@example.com",
+                "fields": {
+                    "first_name": "Juan",
+                    "surname": "Dela Cruz",
+                },
+                "tags": [
+                    {"id": 901, "name": "XENDIT_BUNDLE4_PAID"},
+                ],
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = os.path.join(tmpdir, "systeme_students.json")
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file), patch(
+                "systeme_backfill.systeme_api.available", return_value=True
+            ), patch(
+                "systeme_backfill.systeme_api.list_courses", return_value=[]
+            ), patch(
+                "systeme_backfill.systeme_api.list_contacts", return_value=contacts
+            ), patch(
+                "systeme_backfill.systeme_api.list_enrollments", return_value=[]
+            ):
+                result = systeme_backfill.run_systeme_backfill()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["contacts_with_course_tags"], 1)
+        self.assertEqual(result["bundle_contacts_with_course_tags"], 1)
+        self.assertEqual(result["student_snapshots"], 1)
+
     def test_run_systeme_backfill_merges_duplicate_contacts_by_email(self):
         contacts = [
             {

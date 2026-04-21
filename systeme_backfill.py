@@ -460,7 +460,8 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
     contact_lookup = {}
     snapshots = {}
 
-    tagged_contacts = 0
+    tagged_contact_keys = set()
+    bundle_tagged_contact_keys = set()
 
     logger.info("Building Systeme contact snapshots from %s contacts", len(contacts))
     for contact in contacts:
@@ -472,7 +473,11 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
         tag_courses = _courses_from_contact_tags(contact)
         if tag_courses:
             snapshot["courses"] = tag_courses
-            tagged_contacts += 1
+            tagged_key = _string(snapshot.get("email")) or _string(snapshot.get("contact_id"))
+            if tagged_key:
+                tagged_contact_keys.add(tagged_key)
+                if any(_lower(course.get("kind")) == "course_bundle" for course in tag_courses):
+                    bundle_tagged_contact_keys.add(tagged_key)
         snapshots[snapshot["email"]] = _merge_snapshot(snapshots.get(snapshot["email"]), snapshot)
         if snapshot.get("contact_id"):
             contact_lookup[_string(snapshot["contact_id"])] = contact
@@ -542,11 +547,13 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
             imported_students += 1
 
     logger.info(
-        "Finished Systeme backfill: contacts=%s courses=%s enrollments=%s tagged_contacts=%s imported_students=%s skipped_without_email=%s",
+        "Finished Systeme backfill: contacts=%s courses=%s enrollments=%s tagged_contacts=%s bundle_tagged_contacts=%s unique_snapshots=%s imported_students=%s skipped_without_email=%s",
         len(contacts),
         len(courses),
         len(enrollments),
-        tagged_contacts,
+        len(tagged_contact_keys),
+        len(bundle_tagged_contact_keys),
+        len(snapshots),
         imported_students,
         skipped_without_email,
     )
@@ -558,7 +565,9 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
         "courses_scanned": len(courses),
         "enrollments_scanned": len(enrollments),
         "enrollments_linked": enrollments_linked,
-        "contacts_with_course_tags": tagged_contacts,
+        "contacts_with_course_tags": len(tagged_contact_keys),
+        "bundle_contacts_with_course_tags": len(bundle_tagged_contact_keys),
+        "student_snapshots": len(snapshots),
         "students_imported": imported_students,
         "skipped_without_email": skipped_without_email,
         "hit_contact_page_cap": len(contacts) >= contact_limit * contact_max_pages,

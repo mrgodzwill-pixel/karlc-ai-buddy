@@ -117,6 +117,29 @@ class TelegramBotCommandTests(unittest.TestCase):
         self.assertTrue(started_targets[0]["started"])
         self.assertTrue(started_targets[0]["daemon"])
 
+    def test_format_systeme_backfill_result_uses_clear_unique_labels(self):
+        text = telegram_bot._format_systeme_backfill_result(
+            {
+                "ok": True,
+                "contacts_scanned": 50000,
+                "courses_scanned": 9,
+                "enrollments_scanned": 50000,
+                "enrollments_linked": 50000,
+                "student_snapshots": 960,
+                "contacts_with_course_tags": 464,
+                "bundle_contacts_with_course_tags": 12,
+                "students_imported": 464,
+                "hit_contact_page_cap": True,
+            }
+        )
+
+        self.assertIn("Raw contacts fetched: 50000", text)
+        self.assertIn("Courses scanned via API: 9", text)
+        self.assertIn("Unique student emails merged: 960", text)
+        self.assertIn("Unique contacts with paid tags: 464", text)
+        self.assertIn("Unique contacts with bundle tags: 12", text)
+        self.assertIn("Unique students imported/updated: 464", text)
+
     def test_process_message_systeme_add_uses_manual_contact_flow(self):
         with patch("telegram_bot.send_systeme_manual_contact") as send_contact, patch(
             "telegram_bot.send_message"
