@@ -67,6 +67,16 @@ class TelegramBotCommandTests(unittest.TestCase):
         record_followup_attempt.assert_called_once()
         self.assertTrue(send_message.called)
 
+    def test_process_message_students_runs_grouped_systeme_summary(self):
+        with patch("telegram_bot.send_systeme_students") as send_students, patch(
+            "telegram_bot.send_message"
+        ) as send_message:
+            result = telegram_bot.process_message("/students hybrid")
+
+        send_students.assert_called_once_with(course_query="hybrid")
+        self.assertTrue(send_message.called)
+        self.assertEqual(result, "students")
+
 
 if __name__ == "__main__":
     unittest.main()

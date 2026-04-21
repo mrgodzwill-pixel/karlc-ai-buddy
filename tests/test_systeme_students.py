@@ -104,6 +104,44 @@ class SystemeStudentsTests(unittest.TestCase):
 
         self.assertEqual(summary["count"], 1)
         self.assertIn("MikroTik OSPF", summary["summary"])
+        self.assertNotIn("no phone", summary["summary"])
+
+    def test_course_enrollment_summary_groups_students_by_course(self):
+        payload_a = {
+            "type": "contact.course.enrolled",
+            "data": {
+                "course": {"id": 1, "name": "MikroTik Basic"},
+                "contact": {
+                    "email": "a@example.com",
+                    "fields": {"first_name": "Alpha", "surname": "One"},
+                },
+            },
+            "created_at": "2026-04-21T10:00:00+00:00",
+        }
+        payload_b = {
+            "type": "contact.course.enrolled",
+            "data": {
+                "course": {"id": 1, "name": "MikroTik Basic"},
+                "contact": {
+                    "email": "b@example.com",
+                    "fields": {"first_name": "Bravo", "surname": "Two"},
+                },
+            },
+            "created_at": "2026-04-21T11:00:00+00:00",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = f"{tmpdir}/systeme_students.json"
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file):
+                systeme_students.upsert_systeme_student(payload_a)
+                systeme_students.upsert_systeme_student(payload_b)
+                summary = systeme_students.format_course_enrollment_summary()
+                filtered = systeme_students.format_course_enrollment_summary("basic")
+
+        self.assertIn("*MikroTik Basic* (2)", summary)
+        self.assertIn("Alpha One - a@example.com", summary)
+        self.assertIn("Bravo Two - b@example.com", summary)
+        self.assertIn("*MikroTik Basic* (2)", filtered)
 
 
 if __name__ == "__main__":

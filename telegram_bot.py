@@ -293,6 +293,8 @@ def send_help():
     msg += "📲 /follow 12 | Juan Dela Cruz | 09171234567 - override saved details\n"
     msg += "📬 /support - View recent emails sent to support inbox\n"
     msg += "📊 /enrollment - Run enrollment comparison now\n"
+    msg += "📚 /students - View enrolled students grouped by course\n"
+    msg += "📚 /students hybrid - Filter enrolled students by course keyword\n"
     msg += "🗣️ /chat - Talk to AI Buddy (or just type normally!)\n"
     msg += "❓ /help - Show this help\n"
     msg += "\n━━━━━━━━━━━━━━━━━━\n"
@@ -402,6 +404,13 @@ def send_support_emails():
     emails, _created_tickets = sync_support_email_tickets(emails)
     actionable_emails = filter_unresolved_support_emails(emails)
     send_message(format_support_emails_telegram(actionable_emails))
+
+
+def send_systeme_students(course_query=""):
+    """Show enrolled students grouped by course from the local Systeme store."""
+    from systeme_students import format_course_enrollment_summary
+
+    send_message(format_course_enrollment_summary(course_query=course_query))
 
 
 def resolve_tickets(ticket_ids):
@@ -679,6 +688,12 @@ def process_message(text):
         send_message("⏳ Checking support inbox... sandali lang Boss!")
         send_support_emails()
         return "support"
+
+    if tokens and tokens[0] == "/students":
+        course_query = text.strip()[len(tokens[0]):].strip()
+        send_message("⏳ Checking stored Systeme students... sandali lang Boss!")
+        send_systeme_students(course_query=course_query)
+        return "students"
 
     # /enrollment command OR natural-language ask ("check enrollments",
     # "enrollment status", "paid but not enrolled", etc.) — both run the check

@@ -502,7 +502,7 @@ def format_student_lookup_summary(user_message, limit=5):
         courses_label = ", ".join(course_names[:5]) if course_names else "no course yet"
         lines.append(
             f"• {student.get('name') or 'Unknown'} | {student.get('email') or 'no email'} | "
-            f"{student.get('phone') or 'no phone'} | Courses: {courses_label}"
+            f"Courses: {courses_label}"
         )
 
     return {
@@ -511,3 +511,70 @@ def format_student_lookup_summary(user_message, limit=5):
         "matches": matches,
         "checked_at": lookup.get("checked_at", ""),
     }
+
+
+def format_course_enrollment_summary(course_query="", max_students_per_course=50):
+    """Format enrolled students grouped by course for Telegram/chat."""
+    store = load_student_store()
+    students = store.get("students", [])
+    checked_at = _parse_timestamp(store.get("checked_at", ""))
+    checked_label = checked_at.strftime("%Y-%m-%d %H:%M") + " PHT" if checked_at else "unknown"
+    query = str(course_query or "").strip().lower()
+
+    grouped = {}
+    for student in students:
+        name = str(student.get("name") or "").strip() or str(student.get("email") or "Unknown").strip()
+        email = str(student.get("email") or "").strip().lower()
+        for course in student.get("courses", []):
+            if str(course.get("status") or "").lower() != "enrolled":
+                continue
+            course_name = str(course.get("name") or "").strip()
+            if not course_name:
+                continue
+            if query and query not in course_name.lower():
+                continue
+            grouped.setdefault(course_name, [])
+            grouped[course_name].append(
+                {
+                    "name": name,
+                    "email": email,
+                    "date": course.get("date", ""),
+                }
+            )
+
+    if not grouped:
+        if query:
+            return (
+                "📚 *Systeme Students by Course*\n"
+                f"Last synced: {checked_label}\n\n"
+                f"Walang enrolled students na nakita for `{course_query}` yet."
+            )
+        return (
+            "📚 *Systeme Students by Course*\n"
+            f"Last synced: {checked_label}\n\n"
+            "Wala pang stored enrolled students."
+        )
+
+    lines = ["📚 *Systeme Students by Course*", f"Last synced: {checked_label}", ""]
+    total_students = 0
+    for course_name in sorted(grouped):
+        entries = grouped[course_name]
+        entries.sort(
+            key=lambda item: _parse_timestamp(item.get("date")) or datetime.min.replace(tzinfo=PHT),
+            reverse=True,
+        )
+        lines.append(f"*{course_name}* ({len(entries)})")
+        shown = 0
+        for item in entries:
+            if shown >= max_students_per_course:
+                remaining = len(entries) - shown
+                if remaining > 0:
+                    lines.append(f"…and {remaining} more")
+                break
+            lines.append(f"• {item['name']} - {item['email'] or 'no email'}")
+            shown += 1
+            total_students += 1
+        lines.append("")
+
+    lines.append(f"Known enrolled student rows shown: {total_students}")
+    return "\n".join(lines)
