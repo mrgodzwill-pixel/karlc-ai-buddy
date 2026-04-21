@@ -18,6 +18,7 @@ from storage import save_json
 import systeme_api
 import xendit_api
 from systeme_students import load_student_store
+import systeme_sheet_import
 from xendit_payments import (
     extract_amount as _extract_amount,
     extract_course_from_subject as _extract_course_from_subject,
@@ -246,6 +247,18 @@ def _confirm_systeme_contact_emails(candidate_emails):
 def compare_payments_vs_enrolments(days_back=7):
     """Compare Xendit payments with Systeme.io enrollments."""
     print(f"[Enrollment] Comparing last {days_back} days...")
+
+    if systeme_sheet_import.available():
+        try:
+            sheet_result = systeme_sheet_import.run_configured_import()
+            if sheet_result.get("ok"):
+                print(
+                    f"[Enrollment] Systeme baseline sheet import refreshed {sheet_result.get('students_imported', 0)} student row(s)"
+                )
+            else:
+                print(f"[Enrollment] Systeme baseline sheet import skipped: {sheet_result.get('message', 'not configured')}")
+        except Exception:
+            logger.exception("Systeme baseline sheet import failed before enrollment comparison")
 
     if not gmail_imap.available():
         print("[Enrollment] Gmail IMAP is required to read Systeme enrollment confirmations")

@@ -504,6 +504,30 @@ def send_systeme_backfill():
     return True
 
 
+def send_systeme_sheet_sync():
+    """Import the configured Systeme student summary CSV into the local store."""
+    import systeme_sheet_import
+
+    result = systeme_sheet_import.run_configured_import()
+    if not result.get("ok"):
+        send_message(
+            "❌ Systeme student sheet sync failed.\n"
+            f"{result.get('message', 'Unknown error.')}"
+        )
+        return False
+
+    msg = "📄 *Systeme Student Sheet Sync Complete*\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    msg += f"📥 Source: {result.get('source', 'unknown')}\n"
+    msg += f"🧾 Rows scanned: {result.get('rows_scanned', 0)}\n"
+    msg += f"✅ Students imported/updated: {result.get('students_imported', 0)}\n"
+    if result.get("skipped_without_email", 0):
+        msg += f"⚠️ Skipped without email: {result.get('skipped_without_email', 0)}\n"
+    msg += "\nThe local Systeme student store is refreshed and ready for `/students`, lookups, and enrollment confirmation."
+    send_message(msg)
+    return True
+
+
 def _parse_systeme_add_command(text):
     """Parse `/systeme_add 12` or `/systeme_add email | name | phone`."""
     raw = text.strip().split(maxsplit=1)
@@ -914,6 +938,11 @@ def process_message(text):
         if send_systeme_backfill():
             send_message("⏳ Running Systeme API backfill... this may take a bit, sandali lang Boss!")
         return "systeme_sync"
+
+    if text_lower in ["/systeme_sheet_sync", "/systemesheetsync", "/sheet_sync", "/students_sheet_sync"]:
+        send_message("⏳ Syncing Systeme student sheet... sandali lang Boss!")
+        send_systeme_sheet_sync()
+        return "systeme_sheet_sync"
 
     if tokens and tokens[0] in ["/systeme_add", "/systemeadd", "/contact_add", "/add_contact"]:
         try:
