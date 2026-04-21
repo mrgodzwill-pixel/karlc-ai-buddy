@@ -15,12 +15,16 @@ systeme_api = importlib.import_module("systeme_api")
 
 
 class _FakeResponse:
-    def __init__(self, status_code, payload):
+    def __init__(self, status_code, payload, *, text=None, headers=None, json_error=False):
         self.status_code = status_code
         self._payload = payload
-        self.text = str(payload)
+        self.text = str(payload) if text is None else text
+        self.headers = headers or {}
+        self._json_error = json_error
 
     def json(self):
+        if self._json_error:
+            raise ValueError("not json")
         return self._payload
 
 
@@ -125,6 +129,50 @@ class SystemeAPITests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertTrue(calls[0]["url"].endswith("/contacts/10/tags"))
         self.assertEqual(calls[0]["json"], {"tagId": 20})
+
+    def test_request_accepts_empty_success_body(self):
+        calls = []
+
+        def fake_request(method, url, params=None, headers=None, timeout=None, json=None):
+            calls.append({"method": method, "url": url, "json": json})
+            return _FakeResponse(204, None, text="", headers={}, json_error=True)
+
+        with patch.object(systeme_api, "SYSTEME_API_KEY", "test-key"), patch.object(
+            systeme_api, "_AUTH_MODE_CACHE", "x_api_key_header"
+        ), patch("systeme_api.requests.request", side_effect=fake_request):
+            result = systeme_api.assign_tag_to_contact("10", "20")
+
+        self.assertEqual(result, {})
+        self.assertEqual(len(calls), 1)
+
+    def test_request_falls_back_after_non_json_success(self):
+        calls = []
+
+        def fake_request(method, url, params=None, headers=None, timeout=None, json=None):
+            calls.append({"method": method, "url": url, "headers": headers})
+            api_key_header = (headers or {}).get("X-API-Key", "")
+            auth_header = (headers or {}).get("Authorization", "")
+            if api_key_header == "test-key":
+                return _FakeResponse(
+                    200,
+                    None,
+                    text="<html>login</html>",
+                    headers={"content-type": "text/html"},
+                    json_error=True,
+                )
+            if auth_header == "Bearer test-key":
+                return _FakeResponse(200, {"id": 123, "email": "juan@example.com"})
+            return _FakeResponse(403, {"message": "Forbidden"})
+
+        with patch.object(systeme_api, "SYSTEME_API_KEY", "test-key"), patch.object(
+            systeme_api, "_AUTH_MODE_CACHE", "x_api_key_header"
+        ), patch("systeme_api.requests.request", side_effect=fake_request):
+            result = systeme_api._request("GET", "/contacts")
+
+        self.assertEqual(result["id"], 123)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["headers"].get("X-API-Key"), "test-key")
+        self.assertEqual(calls[1]["headers"].get("Authorization"), "Bearer test-key")
 
     def test_request_retries_transport_error_before_success(self):
         calls = []

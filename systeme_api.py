@@ -85,6 +85,13 @@ def _extract_error_detail(response):
     return str(payload)[:200]
 
 
+def _response_body_preview(response, limit=200):
+    text = str(getattr(response, "text", "") or "").strip()
+    if not text:
+        return ""
+    return text[:limit]
+
+
 def _request(method, path, *, params=None, headers=None, json_body=None, timeout=20, retries=2):
     global _AUTH_MODE_CACHE
 
@@ -97,6 +104,7 @@ def _request(method, path, *, params=None, headers=None, json_body=None, timeout
         base_headers.update(headers)
 
     auth_failures = []
+    last_non_json_error = None
 
     for auth_mode in _auth_variants():
         req_params, req_headers = _with_auth(params, base_headers, auth_mode)
@@ -143,13 +151,36 @@ def _request(method, path, *, params=None, headers=None, json_body=None, timeout
                 _extract_error_detail(response),
             )
 
+        body_preview = _response_body_preview(response)
+        if response.status_code == 204 or not body_preview:
+            _AUTH_MODE_CACHE = auth_mode
+            return {}
+
         try:
             payload = response.json()
         except ValueError as exc:
-            raise SystemeAPIRequestError(response.status_code, "Systeme returned non-JSON response") from exc
+            content_type = str(getattr(response, "headers", {}).get("content-type", "") or "")
+            logger.warning(
+                "Systeme returned non-JSON success for %s %s auth=%s status=%s content_type=%s body=%r",
+                method,
+                path,
+                auth_mode,
+                response.status_code,
+                content_type,
+                body_preview,
+            )
+            last_non_json_error = SystemeAPIRequestError(
+                response.status_code,
+                f"Systeme returned non-JSON response for {method} {path}",
+            )
+            auth_failures.append(f"{auth_mode}:non_json")
+            continue
 
         _AUTH_MODE_CACHE = auth_mode
         return payload
+
+    if last_non_json_error is not None:
+        raise last_non_json_error
 
     logger.warning("Systeme auth failed for %s %s using modes=%s", method, path, ",".join(auth_failures))
     return None
