@@ -77,6 +77,21 @@ def _course_key_from_query(course_query):
     if not query:
         return ""
 
+    exact_title_map = {
+        _normalize("MikroTik QuickStart: Configure From Scratch"): "mikrotik_basic",
+        _normalize("New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)"): "mikrotik_dual_isp",
+        _normalize("Hybrid Access Combo: IPoE + PPPoE"): "mikrotik_hybrid",
+        _normalize("MikroTik Traffic Control Basics"): "mikrotik_traffic",
+        _normalize("10G Core Part 1: ISP Aggregator"): "mikrotik_10g",
+        _normalize("10G Core Part 2: OSPF & Advanced Routing"): "mikrotik_ospf",
+        _normalize("PLC & FBT Combo: Budget-Friendly FTTH Design"): "ftth",
+        _normalize("DIY Hybrid Solar Setup"): "solar",
+        _normalize("10G Core Part 3: Centralized Pisowifi Setup"): "pisowifi",
+        _normalize("Complete MikroTik Mastery Bundle"): "bundle4",
+    }
+    if query in exact_title_map:
+        return exact_title_map[query]
+
     aliases = _course_aliases()
     canonical = aliases.get(query, "")
     if canonical:
