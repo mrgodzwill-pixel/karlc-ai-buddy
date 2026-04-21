@@ -106,6 +106,34 @@ class SystemeStudentsTests(unittest.TestCase):
         self.assertIn("MikroTik OSPF", summary["summary"])
         self.assertNotIn("no phone", summary["summary"])
 
+    def test_contact_tag_added_infers_course_from_paid_tag(self):
+        payload = {
+            "type": "CONTACT_TAG_ADDED",
+            "data": {
+                "contact": {
+                    "id": 29150265,
+                    "email": "tagged@example.com",
+                    "fields": {
+                        "first_name": "Tagged",
+                        "surname": "Student",
+                    },
+                    "tags": [
+                        {"name": "QUICKSTART_PAID"},
+                    ],
+                },
+            },
+            "created_at": "2026-04-21T11:12:29+00:00",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = f"{tmpdir}/systeme_students.json"
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file):
+                student = systeme_students.upsert_systeme_student(payload)
+
+        self.assertEqual(student["email"], "tagged@example.com")
+        self.assertEqual(student["courses"][0]["name"], "MikroTik QuickStart: Configure From Scratch")
+        self.assertEqual(student["courses"][0]["status"], "enrolled")
+
     def test_course_enrollment_summary_groups_students_by_course(self):
         payload_a = {
             "type": "contact.course.enrolled",

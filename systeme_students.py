@@ -8,7 +8,19 @@ courses they purchased or were enrolled into, based on incoming webhook events.
 import os
 from datetime import datetime, timedelta, timezone
 
-from config import DATA_DIR
+from config import (
+    DATA_DIR,
+    SYSTEME_TAG_BUNDLE4,
+    SYSTEME_TAG_FTTH,
+    SYSTEME_TAG_MIKROTIK_10G,
+    SYSTEME_TAG_MIKROTIK_BASIC,
+    SYSTEME_TAG_MIKROTIK_DUAL_ISP,
+    SYSTEME_TAG_MIKROTIK_HYBRID,
+    SYSTEME_TAG_MIKROTIK_OSPF,
+    SYSTEME_TAG_MIKROTIK_TRAFFIC,
+    SYSTEME_TAG_PISOWIFI,
+    SYSTEME_TAG_SOLAR,
+)
 from storage import file_lock, load_json, save_json
 from xendit_payments import extract_lookup_criteria
 
@@ -153,6 +165,64 @@ def _contact_tags(contact):
     return tags
 
 
+def _tag_course_mapping():
+    mapping = {}
+
+    def add(tag_name, course_name, kind="course"):
+        tag_value = str(tag_name or "").strip()
+        if not tag_value:
+            return
+        mapping[tag_value.lower()] = {"name": course_name, "kind": kind}
+        mapping[f"xendit_{tag_value}".lower()] = {"name": course_name, "kind": kind}
+
+    add(SYSTEME_TAG_MIKROTIK_BASIC, "MikroTik QuickStart: Configure From Scratch")
+    add(SYSTEME_TAG_MIKROTIK_DUAL_ISP, "New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)")
+    add(SYSTEME_TAG_MIKROTIK_HYBRID, "Hybrid Access Combo: IPoE + PPPoE")
+    add(SYSTEME_TAG_MIKROTIK_TRAFFIC, "MikroTik Traffic Control Basics")
+    add(SYSTEME_TAG_MIKROTIK_10G, "10G Core Part 1: ISP Aggregator")
+    add(SYSTEME_TAG_MIKROTIK_OSPF, "10G Core Part 2: OSPF & Advanced Routing")
+    add(SYSTEME_TAG_FTTH, "PLC & FBT Combo: Budget-Friendly FTTH Design")
+    add(SYSTEME_TAG_SOLAR, "DIY Hybrid Solar Setup")
+    add(SYSTEME_TAG_PISOWIFI, "10G Core Part 3: Centralized Pisowifi Setup")
+    add(SYSTEME_TAG_BUNDLE4, "Complete MikroTik Mastery Bundle", kind="course_bundle")
+
+    mapping["bundlepaid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
+    mapping["xenditbundlepaid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
+    mapping["3-in-1paid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
+    mapping["3in1paid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
+    mapping["basicpaid"] = {"name": "MikroTik QuickStart: Configure From Scratch", "kind": "course"}
+    mapping["xenditbasicpaid"] = {"name": "MikroTik QuickStart: Configure From Scratch", "kind": "course"}
+    return mapping
+
+
+def _courses_from_tags(tags, event_at, event_type):
+    mapping = _tag_course_mapping()
+    courses = []
+    seen = set()
+    for raw_tag in tags or []:
+        tag = str(raw_tag or "").strip().lower()
+        if not tag:
+            continue
+        course = mapping.get(tag)
+        if not course:
+            continue
+        key = (course["kind"], course["name"].lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        courses.append(
+            {
+                "id": "",
+                "name": course["name"],
+                "kind": course["kind"],
+                "status": "enrolled",
+                "date": event_at,
+                "source_event": event_type or "contact.tag.inferred",
+            }
+        )
+    return courses
+
+
 def _course_entries(payload, event_type, event_at):
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     results = []
@@ -280,6 +350,8 @@ def upsert_systeme_student(payload, event_type="", event_timestamp="", message_i
     phone_number = _contact_phone(contact)
     tags = _contact_tags(contact)
     course_entries = _course_entries(payload, event_type, event_at)
+    if not course_entries and tags:
+        course_entries = _courses_from_tags(tags, event_at, event_type)
     sale_entry = _sale_entry(payload, event_type, event_at)
     fields = _field_map(contact.get("fields") or {})
 
