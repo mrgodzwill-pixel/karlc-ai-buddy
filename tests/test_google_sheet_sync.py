@@ -183,6 +183,40 @@ class GoogleSheetSyncTests(unittest.TestCase):
         mock_append.assert_not_called()
         mock_update_values.assert_not_called()
 
+    def test_sync_student_record_removes_duplicate_rows_before_update(self):
+        google_sheet_sync = importlib.import_module("google_sheet_sync")
+
+        student = {
+            "email": "dup@example.com",
+            "name": "Dup Student",
+            "phone": "639111111111",
+            "courses": [{"name": "Course A"}],
+            "tags": ["TAG_A"],
+        }
+
+        with patch.object(google_sheet_sync, "available", return_value=True), \
+             patch.object(google_sheet_sync, "_ensure_headers"), \
+             patch.object(
+                 google_sheet_sync,
+                 "_get_sheet_values",
+                 return_value=[
+                     ["email"],
+                     ["dup@example.com"],
+                     ["dup@example.com"],
+                 ],
+             ), \
+             patch.object(google_sheet_sync, "_delete_rows") as mock_delete_rows, \
+             patch.object(google_sheet_sync, "_update_values") as mock_update_values, \
+             patch.object(google_sheet_sync, "_append_values") as mock_append:
+            result = google_sheet_sync.sync_student_record(student)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action"], "updated")
+        self.assertEqual(result["duplicates_removed"], 1)
+        mock_delete_rows.assert_called_once_with([3])
+        mock_update_values.assert_called_once()
+        mock_append.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,16 +9,19 @@ This module is optional at runtime. It only activates when both:
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from typing import Iterable
 
 from config import (
+    DATA_DIR,
     SYSTEME_STUDENTS_SHEET_ID,
     SYSTEME_STUDENTS_SHEET_NAME,
     SYSTEME_SHEET_EXCLUDED_TAGS,
     get_google_service_account_info,
 )
+from storage import file_lock
 from systeme_students import load_student_store
 
 logger = logging.getLogger(__name__)
@@ -28,6 +31,7 @@ _HEADERS = [["email", "courses", "tags", "name", "phone"]]
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 _BATCH_SIZE = 200
 _BULLET_PREFIXES = ("Ã¢ÂÂ¢", "â¢", "•", "-")
+_SHEET_WRITE_LOCK_FILE = os.path.join(DATA_DIR, "google_sheet_sync.write.lock")
 
 
 def available():
@@ -238,6 +242,16 @@ def _find_existing_row(email: str):
     return None
 
 
+def _find_rows_by_email(email: str, values=None):
+    email = str(email or "").strip().lower()
+    rows = []
+    source = values if values is not None else _get_sheet_values(_sheet_range("A:A"))
+    for idx, row in enumerate(source[1:], start=2):
+        if str((row[0] if row else "") or "").strip().lower() == email:
+            rows.append(idx)
+    return rows
+
+
 def _pad_row(row, width=5):
     padded = list(row or [])
     if len(padded) < width:
@@ -274,16 +288,39 @@ def sync_student_record(student: dict, allow_append=True):
     if not available():
         return {"ok": False, "message": "Google Sheet write-back is not configured."}
 
-    _ensure_headers()
-    row_values = [_student_row_values(student)]
-    row_number = _find_existing_row(email)
-    if row_number:
-        _update_values(_sheet_range(f"A{row_number}:E{row_number}"), row_values)
-        return {"ok": True, "row": row_number, "action": "updated", "email": email}
-    if not allow_append:
-        return {"ok": False, "message": "Student email was not found in the sheet.", "email": email}
-    _append_values(_sheet_range("A:E"), row_values)
-    return {"ok": True, "row": None, "action": "appended", "email": email}
+    with file_lock(_SHEET_WRITE_LOCK_FILE):
+        _ensure_headers()
+        row_values = [_student_row_values(student)]
+        matching_rows = _find_rows_by_email(email)
+        duplicates_removed = 0
+        if len(matching_rows) > 1:
+            _delete_rows(matching_rows[1:])
+            duplicates_removed = len(matching_rows) - 1
+        row_number = matching_rows[0] if matching_rows else None
+        if row_number:
+            _update_values(_sheet_range(f"A{row_number}:E{row_number}"), row_values)
+            return {
+                "ok": True,
+                "row": row_number,
+                "action": "updated",
+                "email": email,
+                "duplicates_removed": duplicates_removed,
+            }
+        if not allow_append:
+            return {
+                "ok": False,
+                "message": "Student email was not found in the sheet.",
+                "email": email,
+                "duplicates_removed": duplicates_removed,
+            }
+        _append_values(_sheet_range("A:E"), row_values)
+        return {
+            "ok": True,
+            "row": None,
+            "action": "appended",
+            "email": email,
+            "duplicates_removed": duplicates_removed,
+        }
 
 
 def sync_student_by_email(email: str, allow_append=True):
@@ -303,119 +340,132 @@ def sync_xendit_payment_record(record: dict):
     if not email:
         return {"ok": False, "message": "Payment record has no email."}
 
-    existing_row = _find_existing_row(email)
-    if not existing_row:
-        return {"ok": False, "message": "No matching email row in sheet.", "email": email}
+    with file_lock(_SHEET_WRITE_LOCK_FILE):
+        matching_rows = _find_rows_by_email(email)
+        duplicates_removed = 0
+        if len(matching_rows) > 1:
+            _delete_rows(matching_rows[1:])
+            duplicates_removed = len(matching_rows) - 1
+        existing_row = matching_rows[0] if matching_rows else None
+        if not existing_row:
+            return {"ok": False, "message": "No matching email row in sheet.", "email": email}
 
-    current_row = _get_sheet_values(_sheet_range(f"A{existing_row}:E{existing_row}"))
-    current_values = (current_row[0] if current_row else []) + ["", "", "", "", ""]
-    name = str(record.get("payer_name") or current_values[3] or "").strip()
-    phone = str(record.get("phone") or record.get("phone_normalized") or current_values[4] or "").strip()
+        current_row = _get_sheet_values(_sheet_range(f"A{existing_row}:E{existing_row}"))
+        current_values = (current_row[0] if current_row else []) + ["", "", "", "", ""]
+        name = str(record.get("payer_name") or current_values[3] or "").strip()
+        phone = str(record.get("phone") or record.get("phone_normalized") or current_values[4] or "").strip()
 
-    updated = [
-        current_values[0] or email,
-        current_values[1],
-        current_values[2],
-        name,
-        phone,
-    ]
-    _update_values(_sheet_range(f"A{existing_row}:E{existing_row}"), [updated])
-    return {"ok": True, "row": existing_row, "action": "updated_xendit", "email": email}
+        updated = [
+            current_values[0] or email,
+            current_values[1],
+            current_values[2],
+            name,
+            phone,
+        ]
+        _update_values(_sheet_range(f"A{existing_row}:E{existing_row}"), [updated])
+        return {
+            "ok": True,
+            "row": existing_row,
+            "action": "updated_xendit",
+            "email": email,
+            "duplicates_removed": duplicates_removed,
+        }
 
 
 def sync_all_students():
     if not available():
         return {"ok": False, "message": "Google Sheet write-back is not configured."}
 
-    students = load_student_store().get("students", [])
-    updated = 0
-    appended = 0
-    errors = []
-    updates = []
-    appends = []
-    duplicates_removed = 0
+    with file_lock(_SHEET_WRITE_LOCK_FILE):
+        students = load_student_store().get("students", [])
+        updated = 0
+        appended = 0
+        errors = []
+        updates = []
+        appends = []
+        duplicates_removed = 0
 
-    try:
-        values = _get_sheet_values(_sheet_range("A:E"))
-        headers_missing = not values or _pad_row(values[0]) != _HEADERS[0]
-        if headers_missing:
-            _update_values(_sheet_range("A1:E1"), _HEADERS)
+        try:
             values = _get_sheet_values(_sheet_range("A:E"))
+            headers_missing = not values or _pad_row(values[0]) != _HEADERS[0]
+            if headers_missing:
+                _update_values(_sheet_range("A1:E1"), _HEADERS)
+                values = _get_sheet_values(_sheet_range("A:E"))
 
-        duplicate_rows = []
-        seen_emails = {}
+            duplicate_rows = []
+            seen_emails = {}
+            for idx, row in enumerate(values[1:], start=2):
+                current = _pad_row(row)
+                email = str(current[0] or "").strip().lower()
+                if not email:
+                    continue
+                if email in seen_emails:
+                    duplicate_rows.append(idx)
+                else:
+                    seen_emails[email] = idx
+
+            if duplicate_rows:
+                _delete_rows(duplicate_rows)
+                duplicates_removed = len(duplicate_rows)
+                values = _get_sheet_values(_sheet_range("A:E"))
+        except Exception as exc:
+            logger.exception("Failed reading Google Sheet before bulk sync")
+            return {
+                "ok": False,
+                "updated": 0,
+                "appended": 0,
+                "duplicates_removed": 0,
+                "errors": [str(exc)],
+                "students_seen": len(students),
+            }
+
+        email_to_row = {}
+        existing_rows = {}
         for idx, row in enumerate(values[1:], start=2):
             current = _pad_row(row)
             email = str(current[0] or "").strip().lower()
             if not email:
                 continue
-            if email in seen_emails:
-                duplicate_rows.append(idx)
-            else:
-                seen_emails[email] = idx
+            email_to_row[email] = idx
+            existing_rows[idx] = current
 
-        if duplicate_rows:
-            _delete_rows(duplicate_rows)
-            duplicates_removed = len(duplicate_rows)
-            values = _get_sheet_values(_sheet_range("A:E"))
-    except Exception as exc:
-        logger.exception("Failed reading Google Sheet before bulk sync")
+        for student in students:
+            email = str(student.get("email") or "").strip().lower()
+            if not email:
+                errors.append("Student email is required.")
+                continue
+
+            desired = _student_row_values(student)
+            row_number = email_to_row.get(email)
+            if row_number:
+                current = existing_rows.get(row_number, ["", "", "", "", ""])
+                if current != desired:
+                    updates.append(
+                        {
+                            "range": _sheet_range(f"A{row_number}:E{row_number}"),
+                            "majorDimension": "ROWS",
+                            "values": [desired],
+                        }
+                    )
+                    updated += 1
+            else:
+                appends.append(desired)
+                appended += 1
+
+        try:
+            for start in range(0, len(updates), _BATCH_SIZE):
+                _batch_update_values(updates[start : start + _BATCH_SIZE])
+            for start in range(0, len(appends), _BATCH_SIZE):
+                _append_values(_sheet_range("A:E"), appends[start : start + _BATCH_SIZE])
+        except Exception as exc:
+            logger.exception("Failed bulk syncing students to Google Sheet")
+            errors.append(str(exc))
+
         return {
-            "ok": False,
-            "updated": 0,
-            "appended": 0,
-            "duplicates_removed": 0,
-            "errors": [str(exc)],
+            "ok": not errors,
+            "updated": updated,
+            "appended": appended,
+            "duplicates_removed": duplicates_removed,
+            "errors": errors[:10],
             "students_seen": len(students),
         }
-
-    email_to_row = {}
-    existing_rows = {}
-    for idx, row in enumerate(values[1:], start=2):
-        current = _pad_row(row)
-        email = str(current[0] or "").strip().lower()
-        if not email:
-            continue
-        email_to_row[email] = idx
-        existing_rows[idx] = current
-
-    for student in students:
-        email = str(student.get("email") or "").strip().lower()
-        if not email:
-            errors.append("Student email is required.")
-            continue
-
-        desired = _student_row_values(student)
-        row_number = email_to_row.get(email)
-        if row_number:
-            current = existing_rows.get(row_number, ["", "", "", "", ""])
-            if current != desired:
-                updates.append(
-                    {
-                        "range": _sheet_range(f"A{row_number}:E{row_number}"),
-                        "majorDimension": "ROWS",
-                        "values": [desired],
-                    }
-                )
-                updated += 1
-        else:
-            appends.append(desired)
-            appended += 1
-
-    try:
-        for start in range(0, len(updates), _BATCH_SIZE):
-            _batch_update_values(updates[start : start + _BATCH_SIZE])
-        for start in range(0, len(appends), _BATCH_SIZE):
-            _append_values(_sheet_range("A:E"), appends[start : start + _BATCH_SIZE])
-    except Exception as exc:
-        logger.exception("Failed bulk syncing students to Google Sheet")
-        errors.append(str(exc))
-
-    return {
-        "ok": not errors,
-        "updated": updated,
-        "appended": appended,
-        "duplicates_removed": duplicates_removed,
-        "errors": errors[:10],
-        "students_seen": len(students),
-    }
