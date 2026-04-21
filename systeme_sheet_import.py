@@ -21,6 +21,7 @@ from config import (
     SYSTEME_STUDENTS_BASELINE_LOCAL_CSV,
 )
 from systeme_students import upsert_systeme_student_snapshot
+from xendit_payments import find_payment_by_email
 
 logger = logging.getLogger(__name__)
 
@@ -84,12 +85,39 @@ def _row_to_snapshot(row, imported_at):
     }
 
 
+def _enrich_snapshot_from_xendit(snapshot):
+    email = str((snapshot or {}).get("email") or "").strip().lower()
+    if not email:
+        return snapshot, False
+
+    payment = find_payment_by_email(email)
+    if not payment:
+        return snapshot, False
+
+    enriched = dict(snapshot)
+    matched = False
+
+    payer_name = str(payment.get("payer_name") or "").strip()
+    payer_phone = str(payment.get("phone") or payment.get("phone_normalized") or "").strip()
+
+    if payer_name and not str(enriched.get("name") or "").strip():
+        enriched["name"] = payer_name
+        matched = True
+
+    if payer_phone and not str(enriched.get("phone") or "").strip():
+        enriched["phone"] = payer_phone
+        matched = True
+
+    return enriched, matched
+
+
 def import_summary_csv_text(csv_text, source_label="manual", imported_at=""):
     imported_at = str(imported_at or _now_iso()).strip()
     reader = csv.DictReader(io.StringIO(csv_text))
     rows_scanned = 0
     imported_students = 0
     skipped_without_email = 0
+    xendit_matches = 0
 
     for row in reader:
         rows_scanned += 1
@@ -97,6 +125,9 @@ def import_summary_csv_text(csv_text, source_label="manual", imported_at=""):
         if not snapshot:
             skipped_without_email += 1
             continue
+        snapshot, enriched = _enrich_snapshot_from_xendit(snapshot)
+        if enriched:
+            xendit_matches += 1
         imported = upsert_systeme_student_snapshot(
             snapshot,
             source_event="sheet.baseline_import",
@@ -111,6 +142,7 @@ def import_summary_csv_text(csv_text, source_label="manual", imported_at=""):
         "rows_scanned": rows_scanned,
         "students_imported": imported_students,
         "skipped_without_email": skipped_without_email,
+        "xendit_matches": xendit_matches,
         "imported_at": imported_at,
     }
 

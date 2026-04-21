@@ -36,6 +36,27 @@ class SystemeSheetImportTests(unittest.TestCase):
         self.assertEqual(student["tags"], ["QUICKSTART_PAID", "HYBRID_PAID"])
         self.assertTrue(all(course["status"] == "enrolled" for course in student["courses"]))
 
+    def test_import_summary_csv_text_enriches_name_and_phone_from_xendit(self):
+        csv_text = (
+            "email,courses,tags\n"
+            "\"juan@example.com\",\"• MikroTik QuickStart: Configure From Scratch\",\"• QUICKSTART_PAID\"\n"
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = os.path.join(tmpdir, "systeme_students.json")
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file), patch(
+                "systeme_sheet_import.find_payment_by_email",
+                return_value={"payer_name": "Juan Dela Cruz", "phone": "639171234567"},
+            ):
+                result = systeme_sheet_import.import_summary_csv_text(csv_text, source_label="test")
+                store = systeme_students.load_student_store()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["xendit_matches"], 1)
+        student = store["students"][0]
+        self.assertEqual(student["name"], "Juan Dela Cruz")
+        self.assertEqual(student["phone"], "639171234567")
+
 
 if __name__ == "__main__":
     unittest.main()

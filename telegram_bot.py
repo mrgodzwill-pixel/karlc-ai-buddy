@@ -521,6 +521,8 @@ def send_systeme_sheet_sync():
     msg += f"📥 Source: {result.get('source', 'unknown')}\n"
     msg += f"🧾 Rows scanned: {result.get('rows_scanned', 0)}\n"
     msg += f"✅ Students imported/updated: {result.get('students_imported', 0)}\n"
+    if result.get("xendit_matches", 0):
+        msg += f"💳 Matched with Xendit payer info: {result.get('xendit_matches', 0)}\n"
     if result.get("skipped_without_email", 0):
         msg += f"⚠️ Skipped without email: {result.get('skipped_without_email', 0)}\n"
     msg += "\nThe local Systeme student store is refreshed and ready for `/students`, lookups, and enrollment confirmation."
