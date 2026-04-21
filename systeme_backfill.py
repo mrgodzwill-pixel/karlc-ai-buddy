@@ -7,6 +7,7 @@ events so Telegram lookups and course summaries work with historical data too.
 
 import logging
 import re
+from collections import Counter
 from datetime import datetime, timezone
 
 import systeme_api
@@ -377,6 +378,25 @@ def _courses_from_contact_tags(contact):
     return courses
 
 
+def _unknown_paid_like_tags(contact):
+    mapping = _tag_course_mapping()
+    unknown = []
+    for tag in contact.get("tags") or []:
+        if isinstance(tag, dict):
+            tag_name = _string(tag.get("name") or tag.get("label"))
+        else:
+            tag_name = _string(tag)
+        normalized = _lower(tag_name)
+        if not normalized:
+            continue
+        if normalized in mapping:
+            continue
+        if "paid" not in normalized and not normalized.startswith("xendit_"):
+            continue
+        unknown.append(tag_name)
+    return unknown
+
+
 def _course_entry(enrollment, course_lookup):
     course_id = _extract_course_id(enrollment)
     course_name = _extract_course_name(enrollment)
@@ -462,6 +482,8 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
 
     tagged_contact_keys = set()
     bundle_tagged_contact_keys = set()
+    unknown_paid_tag_counter = Counter()
+    unknown_paid_tag_seen = set()
 
     logger.info("Building Systeme contact snapshots from %s contacts", len(contacts))
     for contact in contacts:
@@ -478,6 +500,13 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
                 tagged_contact_keys.add(tagged_key)
                 if any(_lower(course.get("kind")) == "course_bundle" for course in tag_courses):
                     bundle_tagged_contact_keys.add(tagged_key)
+        tagged_key = _string(snapshot.get("email")) or _string(snapshot.get("contact_id"))
+        for tag_name in _unknown_paid_like_tags(contact):
+            unique_key = (tagged_key, _lower(tag_name))
+            if unique_key in unknown_paid_tag_seen:
+                continue
+            unknown_paid_tag_seen.add(unique_key)
+            unknown_paid_tag_counter[tag_name] += 1
         snapshots[snapshot["email"]] = _merge_snapshot(snapshots.get(snapshot["email"]), snapshot)
         if snapshot.get("contact_id"):
             contact_lookup[_string(snapshot["contact_id"])] = contact
@@ -546,8 +575,11 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
         if imported:
             imported_students += 1
 
+    unmapped_snapshots = sum(1 for snapshot in snapshots.values() if not snapshot.get("courses"))
+    unknown_paid_tags = [name for name, _count in unknown_paid_tag_counter.most_common(5)]
+
     logger.info(
-        "Finished Systeme backfill: contacts=%s courses=%s enrollments=%s tagged_contacts=%s bundle_tagged_contacts=%s unique_snapshots=%s imported_students=%s skipped_without_email=%s",
+        "Finished Systeme backfill: contacts=%s courses=%s enrollments=%s tagged_contacts=%s bundle_tagged_contacts=%s unique_snapshots=%s imported_students=%s unmapped_snapshots=%s skipped_without_email=%s unknown_paid_tags=%s",
         len(contacts),
         len(courses),
         len(enrollments),
@@ -555,7 +587,9 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
         len(bundle_tagged_contact_keys),
         len(snapshots),
         imported_students,
+        unmapped_snapshots,
         skipped_without_email,
+        ",".join(unknown_paid_tags),
     )
 
     return {
@@ -569,6 +603,8 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
         "bundle_contacts_with_course_tags": len(bundle_tagged_contact_keys),
         "student_snapshots": len(snapshots),
         "students_imported": imported_students,
+        "students_without_recognized_courses": unmapped_snapshots,
+        "unknown_paid_tags": unknown_paid_tags,
         "skipped_without_email": skipped_without_email,
         "hit_contact_page_cap": len(contacts) >= contact_limit * contact_max_pages,
         "hit_enrollment_page_cap": len(enrollments) >= enrollment_limit * enrollment_max_pages,

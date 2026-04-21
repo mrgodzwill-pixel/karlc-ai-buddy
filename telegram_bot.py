@@ -444,8 +444,13 @@ def _format_systeme_backfill_result(result):
     if result.get("bundle_contacts_with_course_tags", 0):
         msg += f"📦 Unique contacts with bundle tags: {result.get('bundle_contacts_with_course_tags', 0)}\n"
     msg += f"✅ Unique students imported/updated: {result.get('students_imported', 0)}\n"
+    if result.get("students_without_recognized_courses", 0):
+        msg += f"❓ Unique contacts without recognized course mapping: {result.get('students_without_recognized_courses', 0)}\n"
+    if result.get("unknown_paid_tags"):
+        msg += f"🔎 Unknown paid-like tags seen: {', '.join(result.get('unknown_paid_tags', [])[:5])}\n"
     if result.get("hit_contact_page_cap") or result.get("hit_enrollment_page_cap"):
         msg += "\n⚠️ Raw fetch hit the current safety cap, so these raw counts are not the real total yet.\n"
+    msg += "\nℹ️ Bundle enrollments are inferred from recognized bundle tags, not from the course API count.\n"
     if result.get("skipped_without_email", 0):
         msg += f"⚠️ Skipped without email: {result.get('skipped_without_email', 0)}\n"
     msg += "\nTry `/students` or ask me about a student/course right away."

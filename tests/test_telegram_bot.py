@@ -129,6 +129,8 @@ class TelegramBotCommandTests(unittest.TestCase):
                 "contacts_with_course_tags": 464,
                 "bundle_contacts_with_course_tags": 12,
                 "students_imported": 464,
+                "students_without_recognized_courses": 496,
+                "unknown_paid_tags": ["OLD_HYBRID_PAID"],
                 "hit_contact_page_cap": True,
             }
         )
@@ -139,6 +141,9 @@ class TelegramBotCommandTests(unittest.TestCase):
         self.assertIn("Unique contacts with paid tags: 464", text)
         self.assertIn("Unique contacts with bundle tags: 12", text)
         self.assertIn("Unique students imported/updated: 464", text)
+        self.assertIn("Unique contacts without recognized course mapping: 496", text)
+        self.assertIn("Unknown paid-like tags seen: OLD_HYBRID_PAID", text)
+        self.assertIn("Bundle enrollments are inferred from recognized bundle tags", text)
 
     def test_process_message_systeme_add_uses_manual_contact_flow(self):
         with patch("telegram_bot.send_systeme_manual_contact") as send_contact, patch(

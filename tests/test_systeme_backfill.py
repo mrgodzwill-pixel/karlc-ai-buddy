@@ -196,6 +196,39 @@ class SystemeBackfillTests(unittest.TestCase):
         self.assertEqual(result["bundle_contacts_with_course_tags"], 1)
         self.assertEqual(result["student_snapshots"], 1)
 
+    def test_run_systeme_backfill_reports_unknown_paid_like_tags(self):
+        contacts = [
+            {
+                "id": 10,
+                "email": "juan@example.com",
+                "fields": {
+                    "first_name": "Juan",
+                    "surname": "Dela Cruz",
+                },
+                "tags": [
+                    {"id": 950, "name": "OLD_HYBRID_PAID"},
+                ],
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = os.path.join(tmpdir, "systeme_students.json")
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file), patch(
+                "systeme_backfill.systeme_api.available", return_value=True
+            ), patch(
+                "systeme_backfill.systeme_api.list_courses", return_value=[]
+            ), patch(
+                "systeme_backfill.systeme_api.list_contacts", return_value=contacts
+            ), patch(
+                "systeme_backfill.systeme_api.list_enrollments", return_value=[]
+            ):
+                result = systeme_backfill.run_systeme_backfill()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["students_imported"], 0)
+        self.assertEqual(result["students_without_recognized_courses"], 1)
+        self.assertIn("OLD_HYBRID_PAID", result["unknown_paid_tags"])
+
     def test_run_systeme_backfill_merges_duplicate_contacts_by_email(self):
         contacts = [
             {
