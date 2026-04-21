@@ -506,6 +506,7 @@ def send_systeme_backfill():
 
 def send_systeme_sheet_sync():
     """Import the configured Systeme student summary CSV into the local store."""
+    import google_sheet_sync
     import systeme_sheet_import
 
     result = systeme_sheet_import.run_configured_import()
@@ -525,6 +526,18 @@ def send_systeme_sheet_sync():
         msg += f"💳 Matched with Xendit payer info: {result.get('xendit_matches', 0)}\n"
     if result.get("skipped_without_email", 0):
         msg += f"⚠️ Skipped without email: {result.get('skipped_without_email', 0)}\n"
+
+    if google_sheet_sync.available():
+        writeback = google_sheet_sync.sync_all_students()
+        if writeback.get("ok"):
+            msg += f"📝 Google Sheet rows updated: {writeback.get('updated', 0)}\n"
+            if writeback.get("appended", 0):
+                msg += f"➕ Google Sheet rows appended: {writeback.get('appended', 0)}\n"
+        else:
+            msg += "⚠️ Google Sheet write-back skipped or had errors.\n"
+            if writeback.get("errors"):
+                msg += f"   {writeback.get('errors', ['Unknown error'])[0][:120]}\n"
+
     msg += "\nThe local Systeme student store is refreshed and ready for `/students`, lookups, and enrollment confirmation."
     send_message(msg)
     return True

@@ -4,6 +4,7 @@ All sensitive values are loaded from environment variables for security.
 """
 
 import os
+import json
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -47,6 +48,10 @@ SYSTEME_API_KEY = os.environ.get("SYSTEME_API_KEY", "")
 SYSTEME_API_BASE_URL = os.environ.get("SYSTEME_API_BASE_URL", "https://api.systeme.io/api")
 SYSTEME_STUDENTS_BASELINE_CSV_URL = os.environ.get("SYSTEME_STUDENTS_BASELINE_CSV_URL", "").strip()
 SYSTEME_STUDENTS_BASELINE_LOCAL_CSV = os.environ.get("SYSTEME_STUDENTS_BASELINE_LOCAL_CSV", "").strip()
+SYSTEME_STUDENTS_SHEET_ID = os.environ.get("SYSTEME_STUDENTS_SHEET_ID", "").strip()
+SYSTEME_STUDENTS_SHEET_NAME = os.environ.get("SYSTEME_STUDENTS_SHEET_NAME", "Sheet1").strip() or "Sheet1"
+GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+GOOGLE_SERVICE_ACCOUNT_JSON_B64 = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON_B64", "").strip()
 SYSTEME_TAG_MIKROTIK_BASIC = os.environ.get("SYSTEME_TAG_MIKROTIK_BASIC", "QUICKSTART_PAID")
 SYSTEME_TAG_MIKROTIK_DUAL_ISP = os.environ.get("SYSTEME_TAG_MIKROTIK_DUAL_ISP", "DUAL_PAID")
 SYSTEME_TAG_MIKROTIK_HYBRID = os.environ.get("SYSTEME_TAG_MIKROTIK_HYBRID", "HYBRID_PAID")
@@ -86,6 +91,26 @@ REPORT_DIR = os.environ.get("REPORT_DIR") or os.path.join(DATA_DIR, "reports")
 # Ensure directories exist
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(REPORT_DIR, exist_ok=True)
+
+
+def get_google_service_account_info():
+    raw = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
+    if raw:
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+
+    raw_b64 = GOOGLE_SERVICE_ACCOUNT_JSON_B64.strip()
+    if raw_b64:
+        try:
+            import base64
+
+            return json.loads(base64.b64decode(raw_b64).decode("utf-8"))
+        except Exception:
+            return None
+
+    return None
 
 # === Course Catalog ===
 COURSES = {

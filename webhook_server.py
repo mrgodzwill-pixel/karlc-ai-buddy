@@ -325,6 +325,13 @@ def _process_xendit_invoice_webhook(payload: dict, webhook_key: str):
 
     record = process_invoice_webhook(payload)
     if record:
+        try:
+            import google_sheet_sync
+
+            if google_sheet_sync.available():
+                google_sheet_sync.sync_xendit_payment_record(record)
+        except Exception:
+            logger.exception("Failed to sync Xendit invoice record to Google Sheet")
         logger.info(
             "Processed Xendit invoice webhook %s invoice=%s email=%s amount=%s",
             webhook_key,
@@ -342,6 +349,13 @@ def _process_xendit_payment_webhook(payload: dict, webhook_key: str):
 
     record = process_payment_webhook(payload)
     if record:
+        try:
+            import google_sheet_sync
+
+            if google_sheet_sync.available():
+                google_sheet_sync.sync_xendit_payment_record(record)
+        except Exception:
+            logger.exception("Failed to sync Xendit payment record to Google Sheet")
         logger.info(
             "Processed Xendit payment webhook %s payment=%s payer=%s email=%s",
             webhook_key,
@@ -367,6 +381,13 @@ def _process_systeme_webhook(payload: dict, webhook_key: str):
         message_id=message_id,
     )
     if student:
+        try:
+            import google_sheet_sync
+
+            if google_sheet_sync.available():
+                google_sheet_sync.sync_student_record(student)
+        except Exception:
+            logger.exception("Failed to sync Systeme student to Google Sheet")
         logger.info(
             "Processed Systeme webhook %s event=%s email=%s courses=%s",
             webhook_key,

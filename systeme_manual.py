@@ -367,6 +367,13 @@ def add_contact(email="", name="", phone_number="", ticket_id=None):
         event_type="manual.contact_added",
     )
     upsert_systeme_student_snapshot(snapshot, source_event="manual.contact_added", event_timestamp=snapshot["last_event_at"])
+    try:
+        import google_sheet_sync
+
+        if google_sheet_sync.available():
+            google_sheet_sync.sync_student_by_email(email)
+    except Exception:
+        pass
 
     return {
         "contact": contact,
@@ -431,6 +438,13 @@ def enroll_student(email="", course_query="", name="", phone_number="", ticket_i
         event_type="manual.tag_assigned",
     )
     upsert_systeme_student_snapshot(snapshot, source_event="manual.tag_assigned", event_timestamp=course_entry["date"])
+    try:
+        import google_sheet_sync
+
+        if google_sheet_sync.available():
+            google_sheet_sync.sync_student_by_email(email)
+    except Exception:
+        pass
 
     resolved = None
     if ticket and resolve_ticket_on_success:
