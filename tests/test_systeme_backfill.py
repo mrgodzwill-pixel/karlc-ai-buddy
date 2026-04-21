@@ -115,6 +115,43 @@ class SystemeBackfillTests(unittest.TestCase):
         self.assertEqual(store["students"][0]["courses"][0]["name"], "MikroTik QuickStart: Configure From Scratch")
         self.assertEqual(store["students"][0]["courses"][0]["status"], "enrolled")
 
+    def test_run_systeme_backfill_uses_xendit_prefixed_paid_tags_from_contacts(self):
+        contacts = [
+            {
+                "id": 10,
+                "email": "juan@example.com",
+                "fields": {
+                    "first_name": "Juan",
+                    "surname": "Dela Cruz",
+                },
+                "tags": [
+                    {"id": 777, "name": "XENDIT_DUAL_PAID"},
+                ],
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = os.path.join(tmpdir, "systeme_students.json")
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file), patch(
+                "systeme_backfill.systeme_api.available", return_value=True
+            ), patch(
+                "systeme_backfill.systeme_api.list_courses", return_value=[]
+            ), patch(
+                "systeme_backfill.systeme_api.list_contacts", return_value=contacts
+            ), patch(
+                "systeme_backfill.systeme_api.list_enrollments", return_value=[]
+            ):
+                result = systeme_backfill.run_systeme_backfill()
+                store = systeme_students.load_student_store()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["contacts_with_course_tags"], 1)
+        self.assertEqual(result["students_imported"], 1)
+        self.assertEqual(
+            store["students"][0]["courses"][0]["name"],
+            "New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

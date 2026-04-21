@@ -250,6 +250,8 @@ def _tag_course_mapping():
         normalized = _lower(tag_name)
         if normalized:
             mapping[normalized] = {"name": course_name, "kind": kind}
+            automatic_variant = _lower(f"XENDIT_{tag_name}")
+            mapping[automatic_variant] = {"name": course_name, "kind": kind}
 
     add(SYSTEME_TAG_MIKROTIK_BASIC, "MikroTik QuickStart: Configure From Scratch")
     add(SYSTEME_TAG_MIKROTIK_DUAL_ISP, "New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)")
