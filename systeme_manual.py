@@ -16,6 +16,8 @@ from config import (
     SYSTEME_TAG_MIKROTIK_OSPF,
     SYSTEME_TAG_FTTH,
     SYSTEME_TAG_SOLAR,
+    SYSTEME_TAG_PISOWIFI,
+    SYSTEME_TAG_BUNDLE4,
 )
 from systeme_students import upsert_systeme_student_snapshot
 from ticket_system import get_ticket, resolve_ticket
@@ -95,6 +97,31 @@ def _course_key_from_query(course_query):
     return ""
 
 
+def _special_course_keys(course_query):
+    query = _normalize(course_query)
+    specials = {
+        "pisowifi": [
+            "pisowifi",
+            "centralized pisowifi",
+            "10g core part 3",
+            "10g core part 3 centralized pisowifi setup",
+        ],
+        "bundle4": [
+            "bundle4",
+            "complete mikrotik mastery bundle",
+            "mikrotik mastery bundle",
+            "bundle",
+        ],
+    }
+    for course_key, keywords in specials.items():
+        normalized_keywords = [_normalize(keyword) for keyword in keywords]
+        if query in normalized_keywords:
+            return course_key
+        if any(query and query in keyword for keyword in normalized_keywords):
+            return course_key
+    return ""
+
+
 def _configured_tag_name(course_key):
     env_map = {
         "mikrotik_basic": SYSTEME_TAG_MIKROTIK_BASIC,
@@ -105,6 +132,8 @@ def _configured_tag_name(course_key):
         "mikrotik_ospf": SYSTEME_TAG_MIKROTIK_OSPF,
         "ftth": SYSTEME_TAG_FTTH,
         "solar": SYSTEME_TAG_SOLAR,
+        "pisowifi": SYSTEME_TAG_PISOWIFI,
+        "bundle4": SYSTEME_TAG_BUNDLE4,
     }
     return str(env_map.get(course_key) or "").strip()
 
@@ -172,7 +201,7 @@ def _resolve_tag_for_course(course_query):
     if not course_query:
         raise ValueError("Course is required.")
 
-    course_key = _course_key_from_query(course_query)
+    course_key = _course_key_from_query(course_query) or _special_course_keys(course_query)
     configured = _configured_tag_name(course_key) if course_key else ""
     candidate_names = []
     if configured:
