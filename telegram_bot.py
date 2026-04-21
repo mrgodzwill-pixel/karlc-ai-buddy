@@ -24,6 +24,8 @@ from storage import file_lock, load_json, save_json
 
 PHT = timezone(timedelta(hours=8))
 MAX_MSG_LENGTH = 4096
+_SYSTEME_BACKFILL_STATE_LOCK = threading.Lock()
+_SYSTEME_BACKFILL_RUNNING = False
 
 # Conversation history for AI chat
 CONVERSATION_FILE = os.path.join(DATA_DIR, "conversation_history.json")
@@ -418,18 +420,14 @@ def send_systeme_students(course_query=""):
     send_message(format_course_enrollment_summary(course_query=course_query))
 
 
-def send_systeme_backfill():
-    """Run a one-time Systeme Public API backfill for older enrolled students."""
-    from systeme_backfill import run_systeme_backfill
-
-    result = run_systeme_backfill()
+def _format_systeme_backfill_result(result):
+    """Format Systeme backfill results for Telegram."""
     if not result.get("ok"):
-        send_message(
+        return (
             "❌ Systeme API backfill failed.\n"
             f"{result.get('message', 'Unknown error.')}\n\n"
             "Add `SYSTEME_API_KEY` in Railway, redeploy, then try `/systeme_sync` again."
         )
-        return
 
     msg = "📥 *Systeme API Backfill Complete*\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
@@ -445,7 +443,41 @@ def send_systeme_backfill():
     if result.get("skipped_without_email", 0):
         msg += f"⚠️ Skipped without email: {result.get('skipped_without_email', 0)}\n"
     msg += "\nTry `/students` or ask me about a student/course right away."
-    send_message(msg)
+    return msg
+
+
+def _run_systeme_backfill_job():
+    """Run Systeme backfill in the background so Telegram stays responsive."""
+    global _SYSTEME_BACKFILL_RUNNING
+
+    try:
+        from systeme_backfill import run_systeme_backfill
+
+        result = run_systeme_backfill()
+        send_message(_format_systeme_backfill_result(result))
+    except Exception as e:
+        send_message(
+            "❌ Systeme API backfill crashed.\n"
+            f"{str(e)[:250]}"
+        )
+    finally:
+        with _SYSTEME_BACKFILL_STATE_LOCK:
+            _SYSTEME_BACKFILL_RUNNING = False
+
+
+def send_systeme_backfill():
+    """Start a one-time Systeme Public API backfill in the background."""
+    global _SYSTEME_BACKFILL_RUNNING
+
+    with _SYSTEME_BACKFILL_STATE_LOCK:
+        if _SYSTEME_BACKFILL_RUNNING:
+            send_message("⏳ Systeme API backfill is already running, sandali lang Boss!")
+            return False
+        _SYSTEME_BACKFILL_RUNNING = True
+
+    thread = threading.Thread(target=_run_systeme_backfill_job, daemon=True)
+    thread.start()
+    return True
 
 
 def _parse_systeme_add_command(text):
@@ -855,8 +887,8 @@ def process_message(text):
         return "students"
 
     if text_lower in ["/systeme_sync", "/systemesync", "/backfill_systeme"]:
-        send_message("⏳ Running Systeme API backfill... this may take a bit, sandali lang Boss!")
-        send_systeme_backfill()
+        if send_systeme_backfill():
+            send_message("⏳ Running Systeme API backfill... this may take a bit, sandali lang Boss!")
         return "systeme_sync"
 
     if tokens and tokens[0] in ["/systeme_add", "/contact_add", "/add_contact"]:

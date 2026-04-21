@@ -8,6 +8,8 @@ if "requests" not in sys.modules:
     fake_requests = types.ModuleType("requests")
     fake_requests.request = lambda *args, **kwargs: None
     sys.modules["requests"] = fake_requests
+elif not hasattr(sys.modules["requests"], "request"):
+    sys.modules["requests"].request = lambda *args, **kwargs: None
 
 systeme_api = importlib.import_module("systeme_api")
 

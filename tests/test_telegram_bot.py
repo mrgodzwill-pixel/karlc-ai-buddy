@@ -87,6 +87,36 @@ class TelegramBotCommandTests(unittest.TestCase):
         self.assertTrue(send_message.called)
         self.assertEqual(result, "systeme_sync")
 
+    def test_send_systeme_backfill_rejects_duplicate_run(self):
+        with patch.object(telegram_bot, "_SYSTEME_BACKFILL_RUNNING", True), patch(
+            "telegram_bot.send_message"
+        ) as send_message:
+            started = telegram_bot.send_systeme_backfill()
+
+        self.assertFalse(started)
+        send_message.assert_called_once()
+
+    def test_send_systeme_backfill_starts_background_thread(self):
+        started_targets = []
+
+        class FakeThread:
+            def __init__(self, target=None, daemon=None):
+                started_targets.append({"target": target, "daemon": daemon, "started": False})
+                self._slot = started_targets[-1]
+
+            def start(self):
+                self._slot["started"] = True
+
+        with patch.object(telegram_bot, "_SYSTEME_BACKFILL_RUNNING", False), patch(
+            "telegram_bot.threading.Thread", FakeThread
+        ):
+            started = telegram_bot.send_systeme_backfill()
+
+        self.assertTrue(started)
+        self.assertEqual(len(started_targets), 1)
+        self.assertTrue(started_targets[0]["started"])
+        self.assertTrue(started_targets[0]["daemon"])
+
     def test_process_message_systeme_add_uses_manual_contact_flow(self):
         with patch("telegram_bot.send_systeme_manual_contact") as send_contact, patch(
             "telegram_bot.send_message"
