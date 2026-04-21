@@ -15,7 +15,9 @@ from html import unescape
 import gmail_imap
 from config import DATA_DIR, OWNER_EMAIL, SYSTEME_SENDER
 from storage import save_json
+import systeme_api
 import xendit_api
+from systeme_students import load_student_store
 from xendit_payments import (
     extract_amount as _extract_amount,
     extract_course_from_subject as _extract_course_from_subject,
@@ -189,6 +191,58 @@ def _search_enrolment_messages(days_back=7):
     return list(combined.values())
 
 
+def _store_known_systeme_emails():
+    """Return known Systeme student emails with any stored course access."""
+    emails = set()
+    for student in load_student_store().get("students", []):
+        email = str(student.get("email") or "").strip().lower()
+        if not email:
+            continue
+        courses = [course for course in student.get("courses", []) if isinstance(course, dict)]
+        if courses:
+            emails.add(email)
+    return emails
+
+
+def _contact_has_paid_like_access(contact):
+    """Best-effort check for a Systeme contact that likely has paid course access."""
+    if not isinstance(contact, dict):
+        return False
+
+    for tag in contact.get("tags") or []:
+        if isinstance(tag, dict):
+            tag_name = str(tag.get("name") or tag.get("label") or "").strip().lower()
+        else:
+            tag_name = str(tag or "").strip().lower()
+        if not tag_name:
+            continue
+        compact = tag_name.replace("_", "").replace("-", "").replace(" ", "")
+        if "paid" in compact or compact.startswith("xendit"):
+            return True
+    return False
+
+
+def _confirm_systeme_contact_emails(candidate_emails):
+    """Check Systeme API directly for contacts that likely already have course access."""
+    confirmed = set()
+    if not systeme_api.available():
+        return confirmed
+
+    for email in sorted({str(email or "").strip().lower() for email in candidate_emails if str(email or "").strip()}):
+        try:
+            contact = systeme_api.find_contact_by_email(email, timeout=15)
+        except Exception:
+            logger.exception("Systeme API contact lookup failed for %s", email)
+            continue
+
+        if _contact_has_paid_like_access(contact):
+            confirmed.add(email)
+
+    if confirmed:
+        logger.info("Systeme API directly confirmed %s email(s) with paid-like access", len(confirmed))
+    return confirmed
+
+
 def compare_payments_vs_enrolments(days_back=7):
     """Compare Xendit payments with Systeme.io enrollments."""
     print(f"[Enrollment] Comparing last {days_back} days...")
@@ -285,9 +339,25 @@ def compare_payments_vs_enrolments(days_back=7):
     print(f"[Enrollment] Found {len(enrolments)} enrolment confirmations")
 
     enrolled_emails = {e["email"] for e in enrolments}
+    store_emails = _store_known_systeme_emails()
+    if store_emails:
+        print(f"[Enrollment] Stored Systeme student store contributes {len(store_emails)} known email(s)")
+        enrolled_emails.update(store_emails)
+
     matched, unmatched = [], []
     for p in payments:
         (matched if p["email"] in enrolled_emails else unmatched).append(p)
+
+    if unmatched:
+        confirmed_unmatched = _confirm_systeme_contact_emails([p.get("email", "") for p in unmatched])
+        if confirmed_unmatched:
+            enrolled_emails.update(confirmed_unmatched)
+            matched.extend([p for p in unmatched if p.get("email", "") in confirmed_unmatched])
+            unmatched = [p for p in unmatched if p.get("email", "") not in confirmed_unmatched]
+            print(
+                f"[Enrollment] Systeme API confirmed {len(confirmed_unmatched)} additional email(s); "
+                f"updated unmatched count is {len(unmatched)}"
+            )
 
     report = {
         "total_payments": len(payments),
