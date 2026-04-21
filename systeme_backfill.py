@@ -422,9 +422,25 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
             "message": "Systeme Public API key is not configured yet.",
         }
 
+    logger.info(
+        "Starting Systeme backfill: contact_limit=%s contact_max_pages=%s enrollment_limit=%s enrollment_max_pages=%s",
+        contact_limit,
+        contact_max_pages,
+        enrollment_limit,
+        enrollment_max_pages,
+    )
+
+    logger.info("Fetching Systeme courses...")
     courses = systeme_api.list_courses(limit=100, max_pages=10, timeout=45) or []
+    logger.info("Fetched Systeme courses: %s", len(courses))
+
+    logger.info("Fetching Systeme contacts...")
     contacts = systeme_api.list_contacts(limit=contact_limit, max_pages=contact_max_pages, timeout=45)
+    logger.info("Fetched Systeme contacts: %s", 0 if contacts is None else len(contacts))
+
+    logger.info("Fetching Systeme enrollments...")
     enrollments = systeme_api.list_enrollments(limit=enrollment_limit, max_pages=enrollment_max_pages, timeout=45)
+    logger.info("Fetched Systeme enrollments: %s", 0 if enrollments is None else len(enrollments))
 
     if contacts is None:
         return {
@@ -446,6 +462,7 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
 
     tagged_contacts = 0
 
+    logger.info("Building Systeme contact snapshots from %s contacts", len(contacts))
     for contact in contacts:
         if not isinstance(contact, dict):
             continue
@@ -464,6 +481,7 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
     skipped_without_email = 0
     enrollments_linked = 0
 
+    logger.info("Linking %s Systeme enrollments into snapshots", len(enrollments))
     for enrollment in enrollments:
         if not isinstance(enrollment, dict):
             continue
@@ -511,6 +529,7 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
         if event_at:
             snapshot["last_event_at"] = event_at
 
+    logger.info("Writing %s Systeme student snapshots into local store", len(snapshots))
     for snapshot in snapshots.values():
         if not snapshot.get("courses"):
             continue
@@ -521,6 +540,16 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_li
         )
         if imported:
             imported_students += 1
+
+    logger.info(
+        "Finished Systeme backfill: contacts=%s courses=%s enrollments=%s tagged_contacts=%s imported_students=%s skipped_without_email=%s",
+        len(contacts),
+        len(courses),
+        len(enrollments),
+        tagged_contacts,
+        imported_students,
+        skipped_without_email,
+    )
 
     return {
         "ok": True,
