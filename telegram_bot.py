@@ -7,6 +7,7 @@ Telegram Bot for Karl C AI Buddy
 """
 
 import json
+import logging
 import os
 import re
 import time
@@ -26,6 +27,7 @@ PHT = timezone(timedelta(hours=8))
 MAX_MSG_LENGTH = 4096
 _SYSTEME_BACKFILL_STATE_LOCK = threading.Lock()
 _SYSTEME_BACKFILL_RUNNING = False
+logger = logging.getLogger("telegram_bot")
 
 # Conversation history for AI chat
 CONVERSATION_FILE = os.path.join(DATA_DIR, "conversation_history.json")
@@ -451,11 +453,21 @@ def _run_systeme_backfill_job():
     global _SYSTEME_BACKFILL_RUNNING
 
     try:
+        logger.info("Starting Systeme API backfill job in background thread")
         from systeme_backfill import run_systeme_backfill
 
         result = run_systeme_backfill()
+        logger.info(
+            "Systeme API backfill finished: ok=%s contacts=%s enrollments=%s tagged_contacts=%s students_imported=%s",
+            result.get("ok"),
+            result.get("contacts_scanned", 0),
+            result.get("enrollments_scanned", 0),
+            result.get("contacts_with_course_tags", 0),
+            result.get("students_imported", 0),
+        )
         send_message(_format_systeme_backfill_result(result))
     except Exception as e:
+        logger.exception("Systeme API backfill crashed")
         send_message(
             "❌ Systeme API backfill crashed.\n"
             f"{str(e)[:250]}"
@@ -463,6 +475,7 @@ def _run_systeme_backfill_job():
     finally:
         with _SYSTEME_BACKFILL_STATE_LOCK:
             _SYSTEME_BACKFILL_RUNNING = False
+        logger.info("Systeme API backfill background flag cleared")
 
 
 def send_systeme_backfill():
@@ -471,12 +484,14 @@ def send_systeme_backfill():
 
     with _SYSTEME_BACKFILL_STATE_LOCK:
         if _SYSTEME_BACKFILL_RUNNING:
+            logger.info("Ignored duplicate Systeme API backfill request because one is already running")
             send_message("⏳ Systeme API backfill is already running, sandali lang Boss!")
             return False
         _SYSTEME_BACKFILL_RUNNING = True
 
     thread = threading.Thread(target=_run_systeme_backfill_job, daemon=True)
     thread.start()
+    logger.info("Queued Systeme API backfill background thread")
     return True
 
 
