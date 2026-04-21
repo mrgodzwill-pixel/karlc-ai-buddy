@@ -437,6 +437,8 @@ def send_systeme_backfill():
     msg += f"📚 Courses scanned: {result.get('courses_scanned', 0)}\n"
     msg += f"🎓 Enrollments scanned: {result.get('enrollments_scanned', 0)}\n"
     msg += f"🔗 Enrollments linked: {result.get('enrollments_linked', 0)}\n"
+    if result.get("contacts_with_course_tags", 0):
+        msg += f"🏷️ Contacts with paid-course tags: {result.get('contacts_with_course_tags', 0)}\n"
     msg += f"✅ Students imported/updated: {result.get('students_imported', 0)}\n"
     if result.get("skipped_without_email", 0):
         msg += f"⚠️ Skipped without email: {result.get('skipped_without_email', 0)}\n"

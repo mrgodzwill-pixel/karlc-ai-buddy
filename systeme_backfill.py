@@ -10,6 +10,18 @@ import re
 from datetime import datetime, timezone
 
 import systeme_api
+from config import (
+    SYSTEME_TAG_MIKROTIK_BASIC,
+    SYSTEME_TAG_MIKROTIK_DUAL_ISP,
+    SYSTEME_TAG_MIKROTIK_HYBRID,
+    SYSTEME_TAG_MIKROTIK_TRAFFIC,
+    SYSTEME_TAG_MIKROTIK_10G,
+    SYSTEME_TAG_MIKROTIK_OSPF,
+    SYSTEME_TAG_FTTH,
+    SYSTEME_TAG_SOLAR,
+    SYSTEME_TAG_PISOWIFI,
+    SYSTEME_TAG_BUNDLE4,
+)
 from systeme_students import upsert_systeme_student_snapshot
 
 logger = logging.getLogger(__name__)
@@ -231,6 +243,64 @@ def _contact_snapshot(contact):
     }
 
 
+def _tag_course_mapping():
+    mapping = {}
+
+    def add(tag_name, course_name, kind="course"):
+        normalized = _lower(tag_name)
+        if normalized:
+            mapping[normalized] = {"name": course_name, "kind": kind}
+
+    add(SYSTEME_TAG_MIKROTIK_BASIC, "MikroTik QuickStart: Configure From Scratch")
+    add(SYSTEME_TAG_MIKROTIK_DUAL_ISP, "New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)")
+    add(SYSTEME_TAG_MIKROTIK_HYBRID, "Hybrid Access Combo: IPoE + PPPoE")
+    add(SYSTEME_TAG_MIKROTIK_TRAFFIC, "MikroTik Traffic Control Basics")
+    add(SYSTEME_TAG_MIKROTIK_10G, "10G Core Part 1: ISP Aggregator")
+    add(SYSTEME_TAG_MIKROTIK_OSPF, "10G Core Part 2: OSPF & Advanced Routing")
+    add(SYSTEME_TAG_FTTH, "PLC & FBT Combo: Budget-Friendly FTTH Design")
+    add(SYSTEME_TAG_SOLAR, "DIY Hybrid Solar Setup")
+    add(SYSTEME_TAG_PISOWIFI, "10G Core Part 3: Centralized Pisowifi Setup")
+    add(SYSTEME_TAG_BUNDLE4, "Complete MikroTik Mastery Bundle", kind="course_bundle")
+    return mapping
+
+
+def _courses_from_contact_tags(contact):
+    mapping = _tag_course_mapping()
+    event_at = _extract_timestamp(contact) or _now_iso()
+    courses = []
+    seen = set()
+
+    for tag in contact.get("tags") or []:
+        if isinstance(tag, dict):
+            tag_name = _string(tag.get("name") or tag.get("label"))
+            tag_id = _coerce_id(tag.get("id"))
+        else:
+            tag_name = _string(tag)
+            tag_id = ""
+
+        mapped = mapping.get(_lower(tag_name))
+        if not mapped:
+            continue
+
+        key = (_lower(mapped["name"]), mapped["kind"])
+        if key in seen:
+            continue
+        seen.add(key)
+
+        courses.append(
+            {
+                "id": tag_id,
+                "name": mapped["name"],
+                "kind": mapped["kind"],
+                "status": "enrolled",
+                "date": event_at,
+                "source_event": "api.backfill.tag",
+            }
+        )
+
+    return courses
+
+
 def _course_entry(enrollment, course_lookup):
     course_id = _extract_course_id(enrollment)
     course_name = _extract_course_name(enrollment)
@@ -298,12 +368,18 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=50, enrollment_lim
     contact_lookup = {}
     snapshots = {}
 
+    tagged_contacts = 0
+
     for contact in contacts:
         if not isinstance(contact, dict):
             continue
         snapshot = _contact_snapshot(contact)
         if not snapshot:
             continue
+        tag_courses = _courses_from_contact_tags(contact)
+        if tag_courses:
+            snapshot["courses"] = tag_courses
+            tagged_contacts += 1
         snapshots[snapshot["email"]] = snapshot
         if snapshot.get("contact_id"):
             contact_lookup[_string(snapshot["contact_id"])] = contact
@@ -376,6 +452,7 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=50, enrollment_lim
         "courses_scanned": len(courses),
         "enrollments_scanned": len(enrollments),
         "enrollments_linked": enrollments_linked,
+        "contacts_with_course_tags": tagged_contacts,
         "students_imported": imported_students,
         "skipped_without_email": skipped_without_email,
     }
