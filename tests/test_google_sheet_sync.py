@@ -52,6 +52,29 @@ class GoogleSheetSyncTests(unittest.TestCase):
         )
         self.assertEqual(row[2], "QUICKSTART_PAID")
 
+    def test_student_row_values_splits_legacy_combined_entries(self):
+        google_sheet_sync = importlib.import_module("google_sheet_sync")
+
+        row = google_sheet_sync._student_row_values(
+            {
+                "email": "legacy@example.com",
+                "courses": [
+                    {
+                        "name": "â¢ MikroTik QuickStart: Configure From Scratch, Ã¢ÂÂ¢ Hybrid Access Combo: IPoE + PPPoE, Hybrid Access Combo: IPoE + PPPoE"
+                    }
+                ],
+                "tags": [
+                    "500OFF_FOR_VERIFICATION, â¢ QUICKSTART_PAID, Ã¢ÂÂ¢ HYBRID_PAID, HYBRID_PAID"
+                ],
+            }
+        )
+
+        self.assertEqual(
+            row[1],
+            "MikroTik QuickStart: Configure From Scratch, Hybrid Access Combo: IPoE + PPPoE",
+        )
+        self.assertEqual(row[2], "QUICKSTART_PAID, HYBRID_PAID")
+
     def test_available_requires_sheet_id_and_google_credentials(self):
         with patch.dict(
             os.environ,

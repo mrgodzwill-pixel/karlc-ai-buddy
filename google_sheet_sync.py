@@ -9,6 +9,7 @@ This module is optional at runtime. It only activates when both:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Iterable
 
@@ -77,7 +78,10 @@ def _sheet_range(a1_suffix: str):
 
 
 def _clean_list_value(value: str):
-    cleaned = str(value or "").strip()
+    cleaned = str(value or "").replace("\u00a0", " ").strip()
+    for marker in ("Ã¢ÂÂ¢", "â¢", "•"):
+        cleaned = cleaned.replace(marker, " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
     while True:
         original = cleaned
         for prefix in _BULLET_PREFIXES:
@@ -88,12 +92,22 @@ def _clean_list_value(value: str):
     return cleaned.strip(" ,")
 
 
+def _expand_list_values(values: Iterable[str]):
+    expanded = []
+    for raw in values or []:
+        for raw_line in str(raw or "").splitlines():
+            for raw_part in str(raw_line).split(","):
+                cleaned = _clean_list_value(raw_part)
+                if cleaned:
+                    expanded.append(cleaned)
+    return expanded
+
+
 def _normalize_list(values: Iterable[str], *, excluded_values=None):
     excluded = {str(value).strip().lower() for value in (excluded_values or set()) if str(value).strip()}
     ordered = []
     seen = set()
-    for raw in values or []:
-        value = _clean_list_value(raw)
+    for value in _expand_list_values(values):
         if not value:
             continue
         key = value.lower()
