@@ -75,6 +75,14 @@ class GoogleSheetSyncTests(unittest.TestCase):
         )
         self.assertEqual(row[2], "QUICKSTART_PAID, HYBRID_PAID")
 
+    def test_clean_list_value_repairs_nested_mojibake_bullet_prefix(self):
+        google_sheet_sync = importlib.import_module("google_sheet_sync")
+        value = "ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ¢ Hybrid Access Combo: IPoE + PPPoE"
+        self.assertEqual(
+            google_sheet_sync._clean_list_value(value),
+            "Hybrid Access Combo: IPoE + PPPoE",
+        )
+
     def test_available_requires_sheet_id_and_google_credentials(self):
         with patch.dict(
             os.environ,

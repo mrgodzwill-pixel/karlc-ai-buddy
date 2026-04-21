@@ -12,6 +12,7 @@ This can be fed from a local CSV file or a published/exported Google Sheet CSV U
 import csv
 import io
 import logging
+import re
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
@@ -40,9 +41,17 @@ def _split_list_values(value):
     seen = set()
     for raw_line in str(value or "").splitlines():
         for raw_part in str(raw_line).split(","):
-            line = str(raw_part).strip()
+            line = str(raw_part).replace("\u00a0", " ").strip()
             if not line:
                 continue
+            for _ in range(4):
+                try:
+                    repaired = line.encode("latin1").decode("utf-8")
+                except (UnicodeEncodeError, UnicodeDecodeError):
+                    break
+                if repaired == line:
+                    break
+                line = repaired
             while True:
                 original = line
                 for prefix in ("Ã¢ÂÂ¢", "â¢", "•", "-"):
@@ -50,6 +59,7 @@ def _split_list_values(value):
                         line = line[len(prefix):].strip()
                 if line == original:
                     break
+            line = re.sub(r"\s+", " ", line).strip()
             line = line.strip(" ,")
             if line:
                 key = line.lower()

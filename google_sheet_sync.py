@@ -79,6 +79,14 @@ def _sheet_range(a1_suffix: str):
 
 def _clean_list_value(value: str):
     cleaned = str(value or "").replace("\u00a0", " ").strip()
+    for _ in range(4):
+        try:
+            repaired = cleaned.encode("latin1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            break
+        if repaired == cleaned:
+            break
+        cleaned = repaired
     for marker in ("Ã¢ÂÂ¢", "â¢", "•"):
         cleaned = cleaned.replace(marker, " ")
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
