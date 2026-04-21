@@ -8,6 +8,7 @@ one succeeds for the current process.
 """
 
 import logging
+import re
 from typing import Any
 
 import requests
@@ -79,7 +80,7 @@ def _extract_error_detail(response):
     return str(payload)[:200]
 
 
-def _request(method, path, *, params=None, headers=None, timeout=20):
+def _request(method, path, *, params=None, headers=None, json_body=None, timeout=20):
     global _AUTH_MODE_CACHE
 
     if not available():
@@ -95,13 +96,14 @@ def _request(method, path, *, params=None, headers=None, timeout=20):
     for auth_mode in _auth_variants():
         req_params, req_headers = _with_auth(params, base_headers, auth_mode)
         try:
-            response = requests.request(
-                method,
-                url,
-                params=req_params,
-                headers=req_headers,
-                timeout=timeout,
-            )
+            request_kwargs = {
+                "params": req_params,
+                "headers": req_headers,
+                "timeout": timeout,
+            }
+            if json_body is not None:
+                request_kwargs["json"] = json_body
+            response = requests.request(method, url, **request_kwargs)
         except Exception:
             logger.exception("Systeme request failed: %s %s", method, path)
             return None
@@ -213,3 +215,140 @@ def list_courses(limit=100, max_pages=10, timeout=20):
 
 def list_enrollments(limit=100, max_pages=50, timeout=20):
     return _list_collection("/school/enrollments", limit=limit, max_pages=max_pages, timeout=timeout)
+
+
+def _coerce_id(value):
+    if value in (None, ""):
+        return ""
+    if isinstance(value, dict):
+        for key in ("id", "@id", "contactId", "courseId"):
+            nested = value.get(key)
+            if nested not in (None, ""):
+                return _coerce_id(nested)
+        return ""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+    if "/" in text:
+        text = text.rstrip("/").split("/")[-1]
+    match = re.search(r"(\d+)$", text)
+    return match.group(1) if match else text
+
+
+def _first_item(payload):
+    items = _collection_items(payload)
+    return items[0] if items else None
+
+
+def find_contact_by_email(email, timeout=20):
+    email = str(email or "").strip().lower()
+    if not email:
+        return None
+
+    try:
+        payload = _request("GET", "/contacts", params={"email": email}, timeout=timeout)
+    except SystemeAPIRequestError as exc:
+        logger.warning("Systeme contact lookup failed for %s: %s", email, exc)
+        return None
+
+    return _first_item(payload)
+
+
+def _candidate_contact_payloads(email, first_name="", surname="", full_name="", phone_number=""):
+    fields = {}
+    if first_name:
+        fields["first_name"] = first_name
+    if surname:
+        fields["surname"] = surname
+    if phone_number:
+        fields["phone_number"] = phone_number
+
+    base_payload = {"email": email}
+    if full_name:
+        base_payload["name"] = full_name
+    if fields:
+        base_payload["fields"] = fields
+
+    flat_payload = {"email": email}
+    if first_name:
+        flat_payload["first_name"] = first_name
+    if surname:
+        flat_payload["surname"] = surname
+    if phone_number:
+        flat_payload["phone_number"] = phone_number
+    if full_name:
+        flat_payload["name"] = full_name
+
+    wrapped_payload = {"contact": dict(base_payload)}
+    return [base_payload, flat_payload, wrapped_payload]
+
+
+def create_contact(email, *, first_name="", surname="", full_name="", phone_number="", timeout=20):
+    email = str(email or "").strip().lower()
+    if not email:
+        raise ValueError("Email is required")
+
+    existing = find_contact_by_email(email, timeout=timeout)
+    if existing:
+        return existing
+
+    last_error = None
+    for payload in _candidate_contact_payloads(
+        email,
+        first_name=first_name,
+        surname=surname,
+        full_name=full_name,
+        phone_number=phone_number,
+    ):
+        try:
+            created = _request("POST", "/contacts", json_body=payload, timeout=timeout)
+        except SystemeAPIRequestError as exc:
+            last_error = exc
+            message = str(exc).lower()
+            if exc.status_code == 409 or "already" in message or "exists" in message or "duplicate" in message:
+                existing = find_contact_by_email(email, timeout=timeout)
+                if existing:
+                    return existing
+            continue
+
+        if isinstance(created, dict):
+            return created
+
+    if last_error:
+        raise last_error
+
+    return None
+
+
+def _candidate_enrollment_payloads(contact_id, course_id):
+    contact_id = _coerce_id(contact_id)
+    course_id = _coerce_id(course_id)
+    return [
+        {"contactId": contact_id, "courseId": course_id},
+        {"contact_id": contact_id, "course_id": course_id},
+        {"contact": {"id": contact_id}, "course": {"id": course_id}},
+        {"contact": f"/api/contacts/{contact_id}", "course": f"/api/school/courses/{course_id}"},
+        {"contact": contact_id, "course": course_id},
+    ]
+
+
+def create_enrollment(contact_id, course_id, timeout=20):
+    if not contact_id or not course_id:
+        raise ValueError("Both contact_id and course_id are required")
+
+    last_error = None
+    for payload in _candidate_enrollment_payloads(contact_id, course_id):
+        try:
+            created = _request("POST", "/school/enrollments", json_body=payload, timeout=timeout)
+        except SystemeAPIRequestError as exc:
+            last_error = exc
+            continue
+
+        if isinstance(created, dict):
+            return created
+
+    if last_error:
+        raise last_error
+
+    return None

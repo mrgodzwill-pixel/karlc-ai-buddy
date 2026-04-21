@@ -46,6 +46,68 @@ class SystemeAPITests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1]["headers"].get("X-API-Key"), "test-key")
 
+    def test_create_contact_tries_multiple_payload_shapes(self):
+        calls = []
+
+        def fake_request(method, url, params=None, headers=None, timeout=None, json=None):
+            calls.append({"method": method, "url": url, "params": params, "headers": headers, "json": json})
+            if method == "GET":
+                return _FakeResponse(200, [])
+            if method == "POST" and json == {
+                "email": "juan@example.com",
+                "name": "Juan Dela Cruz",
+                "fields": {
+                    "first_name": "Juan",
+                    "surname": "Dela Cruz",
+                    "phone_number": "09171234567",
+                },
+            }:
+                return _FakeResponse(400, {"message": "Bad payload"})
+            if method == "POST" and json == {
+                "email": "juan@example.com",
+                "first_name": "Juan",
+                "surname": "Dela Cruz",
+                "phone_number": "09171234567",
+                "name": "Juan Dela Cruz",
+            }:
+                return _FakeResponse(200, {"id": 555, "email": "juan@example.com"})
+            return _FakeResponse(400, {"message": "Unexpected"})
+
+        with patch.object(systeme_api, "SYSTEME_API_KEY", "test-key"), patch.object(
+            systeme_api, "_AUTH_MODE_CACHE", "x_api_key_header"
+        ), patch("systeme_api.requests.request", side_effect=fake_request):
+            contact = systeme_api.create_contact(
+                "juan@example.com",
+                first_name="Juan",
+                surname="Dela Cruz",
+                full_name="Juan Dela Cruz",
+                phone_number="09171234567",
+            )
+
+        self.assertEqual(contact["id"], 555)
+        self.assertEqual(contact["email"], "juan@example.com")
+        post_calls = [call for call in calls if call["method"] == "POST"]
+        self.assertEqual(len(post_calls), 2)
+
+    def test_create_enrollment_tries_multiple_payload_shapes(self):
+        calls = []
+
+        def fake_request(method, url, params=None, headers=None, timeout=None, json=None):
+            calls.append({"method": method, "url": url, "json": json})
+            if json == {"contactId": "10", "courseId": "20"}:
+                return _FakeResponse(400, {"message": "Bad payload"})
+            if json == {"contact_id": "10", "course_id": "20"}:
+                return _FakeResponse(200, {"id": 999})
+            return _FakeResponse(400, {"message": "Unexpected"})
+
+        with patch.object(systeme_api, "SYSTEME_API_KEY", "test-key"), patch.object(
+            systeme_api, "_AUTH_MODE_CACHE", "x_api_key_header"
+        ), patch("systeme_api.requests.request", side_effect=fake_request):
+            enrollment = systeme_api.create_enrollment("10", "20")
+
+        self.assertEqual(enrollment["id"], 999)
+        self.assertEqual(len(calls), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

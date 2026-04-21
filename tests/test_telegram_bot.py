@@ -87,6 +87,32 @@ class TelegramBotCommandTests(unittest.TestCase):
         self.assertTrue(send_message.called)
         self.assertEqual(result, "systeme_sync")
 
+    def test_process_message_systeme_add_uses_manual_contact_flow(self):
+        with patch("telegram_bot.send_systeme_manual_contact") as send_contact, patch(
+            "telegram_bot.send_message"
+        ) as send_message:
+            result = telegram_bot.process_message("/systeme_add 12")
+
+        send_contact.assert_called_once_with(ticket_id=12, email="", name="", phone_number="")
+        self.assertTrue(send_message.called)
+        self.assertEqual(result, "systeme_add")
+
+    def test_process_message_systeme_enroll_uses_manual_enrollment_flow(self):
+        with patch("telegram_bot.send_systeme_manual_enrollment") as send_enroll, patch(
+            "telegram_bot.send_message"
+        ) as send_message:
+            result = telegram_bot.process_message("/systeme_enroll 12")
+
+        send_enroll.assert_called_once_with(
+            ticket_id=12,
+            email="",
+            course_query="",
+            name="",
+            phone_number="",
+        )
+        self.assertTrue(send_message.called)
+        self.assertEqual(result, "systeme_enroll")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -296,6 +296,10 @@ def send_help():
     msg += "📚 /students - View enrolled students grouped by course\n"
     msg += "📚 /students hybrid - Filter enrolled students by course keyword\n"
     msg += "📥 /systeme\\_sync - Import old enrolled students from Systeme API\n"
+    msg += "📇 /systeme\\_add 12 - Create a Systeme contact from a ticket\n"
+    msg += "📇 /systeme\\_add juan@example.com | Juan Dela Cruz | 09171234567\n"
+    msg += "🎓 /systeme\\_enroll 12 - Create/add contact then enroll from a ticket\n"
+    msg += "🎓 /systeme\\_enroll juan@example.com | MikroTik Hybrid | Juan Dela Cruz | 09171234567\n"
     msg += "🗣️ /chat - Talk to AI Buddy (or just type normally!)\n"
     msg += "❓ /help - Show this help\n"
     msg += "\n━━━━━━━━━━━━━━━━━━\n"
@@ -437,6 +441,129 @@ def send_systeme_backfill():
     if result.get("skipped_without_email", 0):
         msg += f"⚠️ Skipped without email: {result.get('skipped_without_email', 0)}\n"
     msg += "\nTry `/students` or ask me about a student/course right away."
+    send_message(msg)
+
+
+def _parse_systeme_add_command(text):
+    """Parse `/systeme_add 12` or `/systeme_add email | name | phone`."""
+    raw = text.strip().split(maxsplit=1)
+    raw = raw[1].strip() if len(raw) > 1 else ""
+    if not raw:
+        raise ValueError("Usage: /systeme_add 12 OR /systeme_add juan@example.com | Juan Dela Cruz | 09171234567")
+
+    parts = [part.strip() for part in raw.split("|")]
+    if len(parts) == 1 and parts[0].isdigit():
+        return {"ticket_id": int(parts[0]), "email": "", "name": "", "phone_number": ""}
+    if len(parts) == 1:
+        return {"ticket_id": None, "email": parts[0], "name": "", "phone_number": ""}
+    if len(parts) == 2:
+        return {"ticket_id": None, "email": parts[0], "name": parts[1], "phone_number": ""}
+    if len(parts) == 3:
+        return {"ticket_id": None, "email": parts[0], "name": parts[1], "phone_number": parts[2]}
+    raise ValueError("Usage: /systeme_add 12 OR /systeme_add juan@example.com | Juan Dela Cruz | 09171234567")
+
+
+def _parse_systeme_enroll_command(text):
+    """Parse `/systeme_enroll 12` or `/systeme_enroll email | course | name | phone`."""
+    raw = text.strip().split(maxsplit=1)
+    raw = raw[1].strip() if len(raw) > 1 else ""
+    if not raw:
+        raise ValueError("Usage: /systeme_enroll 12 OR /systeme_enroll juan@example.com | MikroTik Hybrid | Juan Dela Cruz | 09171234567")
+
+    parts = [part.strip() for part in raw.split("|")]
+    if len(parts) == 1 and parts[0].isdigit():
+        return {
+            "ticket_id": int(parts[0]),
+            "email": "",
+            "course_query": "",
+            "name": "",
+            "phone_number": "",
+        }
+    if len(parts) == 2:
+        return {
+            "ticket_id": None,
+            "email": parts[0],
+            "course_query": parts[1],
+            "name": "",
+            "phone_number": "",
+        }
+    if len(parts) == 3:
+        return {
+            "ticket_id": None,
+            "email": parts[0],
+            "course_query": parts[1],
+            "name": parts[2],
+            "phone_number": "",
+        }
+    if len(parts) == 4:
+        return {
+            "ticket_id": None,
+            "email": parts[0],
+            "course_query": parts[1],
+            "name": parts[2],
+            "phone_number": parts[3],
+        }
+    raise ValueError("Usage: /systeme_enroll 12 OR /systeme_enroll juan@example.com | MikroTik Hybrid | Juan Dela Cruz | 09171234567")
+
+
+def send_systeme_manual_contact(ticket_id=None, email="", name="", phone_number=""):
+    """Create a contact in Systeme manually or from an enrollment ticket."""
+    from systeme_manual import add_contact
+
+    result = add_contact(
+        email=email,
+        name=name,
+        phone_number=phone_number,
+        ticket_id=ticket_id,
+    )
+    contact = result["contact"]
+    msg = "📇 *Systeme Contact Ready*\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    if result.get("ticket_id"):
+        msg += f"🎫 From ticket #{result['ticket_id']}\n"
+    msg += f"👤 {result.get('name') or result.get('email')}\n"
+    msg += f"📧 {result.get('email')}\n"
+    if result.get("phone_number"):
+        msg += f"📱 {result.get('phone_number')}\n"
+    if contact.get("id") not in (None, ""):
+        msg += f"🆔 Contact ID: {contact.get('id')}\n"
+    msg += "\nContact is now saved in Systeme and in the bot's local student memory."
+    send_message(msg)
+
+
+def send_systeme_manual_enrollment(ticket_id=None, email="", course_query="", name="", phone_number=""):
+    """Create contact if needed, enroll student in Systeme, and resolve ticket if applicable."""
+    from systeme_manual import enroll_student
+
+    result = enroll_student(
+        email=email,
+        course_query=course_query,
+        name=name,
+        phone_number=phone_number,
+        ticket_id=ticket_id,
+        resolve_ticket_on_success=True,
+    )
+    contact = result["contact"]
+    course = result["course"]
+    msg = "🎓 *Systeme Enrollment Complete*\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    if result.get("ticket_id"):
+        msg += f"🎫 Ticket #{result['ticket_id']}\n"
+    msg += f"👤 {result.get('name') or result.get('email')}\n"
+    msg += f"📧 {result.get('email')}\n"
+    msg += f"📚 {course.get('name') or course_query}\n"
+    if result.get("phone_number"):
+        msg += f"📱 {result.get('phone_number')}\n"
+    if contact.get("id") not in (None, ""):
+        msg += f"🆔 Contact ID: {contact.get('id')}\n"
+    if course.get("id") not in (None, ""):
+        msg += f"🆔 Course ID: {course.get('id')}\n"
+    if result.get("already_enrolled"):
+        msg += "\nℹ️ Student was already enrolled in Systeme. Local store was refreshed anyway."
+    else:
+        msg += "\n✅ Student is now enrolled in Systeme."
+    if result.get("ticket_id"):
+        msg += "\n✅ Related pending ticket was marked resolved."
     send_message(msg)
 
 
@@ -726,6 +853,24 @@ def process_message(text):
         send_message("⏳ Running Systeme API backfill... this may take a bit, sandali lang Boss!")
         send_systeme_backfill()
         return "systeme_sync"
+
+    if tokens and tokens[0] in ["/systeme_add", "/contact_add", "/add_contact"]:
+        try:
+            parsed = _parse_systeme_add_command(text)
+            send_message("⏳ Creating Systeme contact... sandali lang Boss!")
+            send_systeme_manual_contact(**parsed)
+        except Exception as e:
+            send_message(f"❌ {str(e)[:250]}")
+        return "systeme_add"
+
+    if tokens and tokens[0] in ["/systeme_enroll", "/enroll_student", "/manual_enroll"]:
+        try:
+            parsed = _parse_systeme_enroll_command(text)
+            send_message("⏳ Enrolling student in Systeme... sandali lang Boss!")
+            send_systeme_manual_enrollment(**parsed)
+        except Exception as e:
+            send_message(f"❌ {str(e)[:250]}")
+        return "systeme_enroll"
 
     # /enrollment command OR natural-language ask ("check enrollments",
     # "enrollment status", "paid but not enrolled", etc.) — both run the check

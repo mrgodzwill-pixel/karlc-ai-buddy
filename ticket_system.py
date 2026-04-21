@@ -500,6 +500,9 @@ def format_pending_tickets_telegram():
     msg += "━━━━━━━━━━━━━━━━━━\n"
     msg += "✅ /done 1 - Resolve ticket #1\n"
     msg += "✅ /done 1 2 3 - Resolve multiple\n"
+    if any(t["type"] == "enrollment_incomplete" for t in pending):
+        msg += "📇 /systeme_add 12 - Create Systeme contact from enrollment ticket\n"
+        msg += "🎓 /systeme_enroll 12 - Add/enroll that ticket directly in Systeme\n"
     
     return msg
 
