@@ -299,7 +299,7 @@ def send_help():
     msg += "📊 /enrollment - Run enrollment comparison now\n"
     msg += "📚 /students - View enrolled students grouped by course\n"
     msg += "📚 /students hybrid - Filter enrolled students by course keyword\n"
-    msg += "📥 /systeme\\_sync - Import old enrolled students from Systeme API\n"
+    msg += "📄 /systeme\\_sync - Refresh student baseline from Google Sheet + Xendit\n"
     msg += "📇 /systeme\\_add 12 - Create a Systeme contact from a ticket\n"
     msg += "📇 /systeme\\_add juan@example.com | Juan Dela Cruz | 09171234567\n"
     msg += "🎓 /systeme\\_enroll 12 - Create/add contact then assign course tag from a ticket\n"
@@ -936,15 +936,22 @@ def process_message(text):
         send_systeme_students(course_query=course_query)
         return "students"
 
-    if text_lower in ["/systeme_sync", "/systemesync", "/backfill_systeme", "/systemesync"]:
-        if send_systeme_backfill():
-            send_message("⏳ Running Systeme API backfill... this may take a bit, sandali lang Boss!")
-        return "systeme_sync"
-
-    if text_lower in ["/systeme_sheet_sync", "/systemesheetsync", "/sheet_sync", "/students_sheet_sync"]:
+    if text_lower in [
+        "/systeme_sync",
+        "/systemesync",
+        "/systeme_sheet_sync",
+        "/systemesheetsync",
+        "/sheet_sync",
+        "/students_sheet_sync",
+    ]:
         send_message("⏳ Syncing Systeme student sheet... sandali lang Boss!")
         send_systeme_sheet_sync()
-        return "systeme_sheet_sync"
+        return "systeme_sync"
+
+    if text_lower in ["/systeme_api_sync", "/systemeapisync", "/backfill_systeme", "/systeme_backfill"]:
+        if send_systeme_backfill():
+            send_message("⏳ Running Systeme API backfill... this may take a bit, sandali lang Boss!")
+        return "systeme_api_sync"
 
     if tokens and tokens[0] in ["/systeme_add", "/systemeadd", "/contact_add", "/add_contact"]:
         try:

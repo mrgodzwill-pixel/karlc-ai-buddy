@@ -77,17 +77,17 @@ class TelegramBotCommandTests(unittest.TestCase):
         self.assertTrue(send_message.called)
         self.assertEqual(result, "students")
 
-    def test_process_message_systeme_sync_runs_backfill(self):
-        with patch("telegram_bot.send_systeme_backfill") as send_backfill, patch(
+    def test_process_message_systeme_sync_runs_sheet_import(self):
+        with patch("telegram_bot.send_systeme_sheet_sync") as send_sheet_sync, patch(
             "telegram_bot.send_message"
         ) as send_message:
             result = telegram_bot.process_message("/systeme_sync")
 
-        send_backfill.assert_called_once_with()
+        send_sheet_sync.assert_called_once_with()
         self.assertTrue(send_message.called)
         self.assertEqual(result, "systeme_sync")
 
-    def test_process_message_systeme_sheet_sync_runs_import(self):
+    def test_process_message_systeme_sheet_sync_alias_runs_import(self):
         with patch("telegram_bot.send_systeme_sheet_sync") as send_sheet_sync, patch(
             "telegram_bot.send_message"
         ) as send_message:
@@ -95,7 +95,17 @@ class TelegramBotCommandTests(unittest.TestCase):
 
         send_sheet_sync.assert_called_once_with()
         self.assertTrue(send_message.called)
-        self.assertEqual(result, "systeme_sheet_sync")
+        self.assertEqual(result, "systeme_sync")
+
+    def test_process_message_systeme_api_sync_runs_backfill(self):
+        with patch("telegram_bot.send_systeme_backfill") as send_backfill, patch(
+            "telegram_bot.send_message"
+        ) as send_message:
+            result = telegram_bot.process_message("/systeme_api_sync")
+
+        send_backfill.assert_called_once_with()
+        self.assertTrue(send_message.called)
+        self.assertEqual(result, "systeme_api_sync")
 
     def test_send_systeme_backfill_rejects_duplicate_run(self):
         with patch.object(telegram_bot, "_SYSTEME_BACKFILL_RUNNING", True), patch(
