@@ -3,8 +3,8 @@ Import a normalized Systeme student summary CSV into the local student store.
 
 Expected columns:
 - email
-- courses (newline/bullet list)
-- tags (newline/bullet list)
+- courses (comma-separated or newline/bullet list)
+- tags (comma-separated or newline/bullet list)
 
 This can be fed from a local CSV file or a published/exported Google Sheet CSV URL.
 """
@@ -34,18 +34,19 @@ def _now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _split_bullets(value):
+def _split_list_values(value):
     lines = []
-    for raw in str(value or "").splitlines():
-        line = str(raw).strip()
-        if not line:
-            continue
-        if line.startswith("•"):
-            line = line[1:].strip()
-        elif line.startswith("-"):
-            line = line[1:].strip()
-        if line:
-            lines.append(line)
+    for raw_line in str(value or "").splitlines():
+        for raw_part in str(raw_line).split(","):
+            line = str(raw_part).strip()
+            if not line:
+                continue
+            if line.startswith("•"):
+                line = line[1:].strip()
+            elif line.startswith("-"):
+                line = line[1:].strip()
+            if line:
+                lines.append(line)
     return lines
 
 
@@ -54,8 +55,8 @@ def _row_to_snapshot(row, imported_at):
     if not email:
         return None
 
-    course_names = _split_bullets(row.get("courses") or row.get("Courses") or "")
-    tags = _split_bullets(row.get("tags") or row.get("Tags") or "")
+    course_names = _split_list_values(row.get("courses") or row.get("Courses") or "")
+    tags = _split_list_values(row.get("tags") or row.get("Tags") or "")
 
     courses = [
         {

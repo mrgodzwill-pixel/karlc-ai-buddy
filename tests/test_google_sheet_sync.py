@@ -22,8 +22,11 @@ class GoogleSheetSyncTests(unittest.TestCase):
         )
 
         self.assertEqual(row[0], "juan@example.com")
-        self.assertIn("• MikroTik QuickStart: Configure From Scratch", row[1])
-        self.assertIn("• Hybrid Access Combo: IPoE + PPPoE", row[1])
+        self.assertEqual(
+            row[1],
+            "MikroTik QuickStart: Configure From Scratch, Hybrid Access Combo: IPoE + PPPoE",
+        )
+        self.assertEqual(row[2], "QUICKSTART_PAID, HYBRID_PAID")
         self.assertEqual(row[3], "Juan Dela Cruz")
         self.assertEqual(row[4], "639171234567")
 
@@ -68,7 +71,7 @@ class GoogleSheetSyncTests(unittest.TestCase):
 
         existing_sheet_rows = [
             ["email", "courses", "tags", "name", "phone"],
-            ["existing@example.com", "• Old Course", "• OLD_TAG", "Old Name", ""],
+            ["existing@example.com", "Old Course", "OLD_TAG", "Old Name", ""],
         ]
 
         with patch.object(google_sheet_sync, "available", return_value=True), \

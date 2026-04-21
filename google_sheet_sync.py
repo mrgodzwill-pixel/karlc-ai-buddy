@@ -74,7 +74,7 @@ def _sheet_range(a1_suffix: str):
     return f"{SYSTEME_STUDENTS_SHEET_NAME}!{a1_suffix}"
 
 
-def _normalize_bullets(values: Iterable[str]):
+def _normalize_list(values: Iterable[str]):
     ordered = []
     seen = set()
     for raw in values or []:
@@ -86,7 +86,7 @@ def _normalize_bullets(values: Iterable[str]):
             continue
         seen.add(key)
         ordered.append(value)
-    return "\n".join(f"• {value}" for value in ordered)
+    return ", ".join(ordered)
 
 
 def _student_row_values(student: dict):
@@ -94,8 +94,8 @@ def _student_row_values(student: dict):
     tags = student.get("tags", [])
     return [
         str(student.get("email") or "").strip().lower(),
-        _normalize_bullets(courses),
-        _normalize_bullets(tags),
+        _normalize_list(courses),
+        _normalize_list(tags),
         str(student.get("name") or "").strip(),
         str(student.get("phone") or "").strip(),
     ]
