@@ -533,6 +533,8 @@ def send_systeme_sheet_sync():
             msg += f"📝 Google Sheet rows updated: {writeback.get('updated', 0)}\n"
             if writeback.get("appended", 0):
                 msg += f"➕ Google Sheet rows appended: {writeback.get('appended', 0)}\n"
+            if writeback.get("duplicates_removed", 0):
+                msg += f"🧹 Duplicate sheet rows removed: {writeback.get('duplicates_removed', 0)}\n"
         else:
             msg += "⚠️ Google Sheet write-back skipped or had errors.\n"
             if writeback.get("errors"):

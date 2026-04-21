@@ -142,6 +142,47 @@ class GoogleSheetSyncTests(unittest.TestCase):
         mock_batch_update.assert_called_once()
         mock_append.assert_called_once()
 
+    def test_sync_all_students_removes_duplicate_email_rows_before_updating(self):
+        google_sheet_sync = importlib.import_module("google_sheet_sync")
+
+        students = {
+            "students": [
+                {
+                    "email": "dup@example.com",
+                    "name": "Dup Student",
+                    "phone": "639111111111",
+                    "courses": [{"name": "Course A"}],
+                    "tags": ["TAG_A"],
+                }
+            ]
+        }
+
+        first_read = [
+            ["email", "courses", "tags", "name", "phone"],
+            ["dup@example.com", "Old Course", "OLD_TAG", "Old Name", ""],
+            ["dup@example.com", "Old Course", "OLD_TAG", "Old Name", ""],
+        ]
+        second_read = [
+            ["email", "courses", "tags", "name", "phone"],
+            ["dup@example.com", "Old Course", "OLD_TAG", "Old Name", ""],
+        ]
+
+        with patch.object(google_sheet_sync, "available", return_value=True), \
+             patch.object(google_sheet_sync, "load_student_store", return_value=students), \
+             patch.object(google_sheet_sync, "_get_sheet_values", side_effect=[first_read, second_read]), \
+             patch.object(google_sheet_sync, "_delete_rows") as mock_delete_rows, \
+             patch.object(google_sheet_sync, "_update_values") as mock_update_values, \
+             patch.object(google_sheet_sync, "_batch_update_values") as mock_batch_update, \
+             patch.object(google_sheet_sync, "_append_values") as mock_append:
+            result = google_sheet_sync.sync_all_students()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["duplicates_removed"], 1)
+        mock_delete_rows.assert_called_once_with([3])
+        mock_batch_update.assert_called_once()
+        mock_append.assert_not_called()
+        mock_update_values.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

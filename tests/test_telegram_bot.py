@@ -107,6 +107,29 @@ class TelegramBotCommandTests(unittest.TestCase):
         self.assertTrue(send_message.called)
         self.assertEqual(result, "systeme_api_sync")
 
+    def test_send_systeme_sheet_sync_reports_removed_duplicate_rows(self):
+        with patch(
+            "systeme_sheet_import.run_configured_import",
+            return_value={
+                "ok": True,
+                "source": "test-source",
+                "rows_scanned": 10,
+                "students_imported": 9,
+                "xendit_matches": 2,
+                "skipped_without_email": 1,
+            },
+        ), patch("google_sheet_sync.available", return_value=True), patch(
+            "google_sheet_sync.sync_all_students",
+            return_value={"ok": True, "updated": 3, "appended": 1, "duplicates_removed": 2},
+        ), patch("telegram_bot.send_message") as send_message:
+            started = telegram_bot.send_systeme_sheet_sync()
+
+        self.assertTrue(started)
+        text = send_message.call_args[0][0]
+        self.assertIn("Duplicate sheet rows removed: 2", text)
+        self.assertIn("Google Sheet rows updated: 3", text)
+        self.assertIn("Google Sheet rows appended: 1", text)
+
     def test_send_systeme_backfill_rejects_duplicate_run(self):
         with patch.object(telegram_bot, "_SYSTEME_BACKFILL_RUNNING", True), patch(
             "telegram_bot.send_message"

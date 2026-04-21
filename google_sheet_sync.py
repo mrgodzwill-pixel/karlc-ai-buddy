@@ -73,6 +73,10 @@ def _batch_update_url():
     return f"https://sheets.googleapis.com/v4/spreadsheets/{SYSTEME_STUDENTS_SHEET_ID}/values:batchUpdate"
 
 
+def _spreadsheet_url():
+    return f"https://sheets.googleapis.com/v4/spreadsheets/{SYSTEME_STUDENTS_SHEET_ID}"
+
+
 def _sheet_range(a1_suffix: str):
     return f"{SYSTEME_STUDENTS_SHEET_NAME}!{a1_suffix}"
 
@@ -198,6 +202,16 @@ def _batch_update_values(updates):
     )
 
 
+def _spreadsheet_batch_update(requests):
+    if not requests:
+        return {}
+    return _request_json(
+        "POST",
+        f"{_spreadsheet_url()}:batchUpdate",
+        json={"requests": requests},
+    )
+
+
 def _ensure_headers():
     a1 = _sheet_range("A1:E1")
     existing = _get_sheet_values(a1)
@@ -205,6 +219,15 @@ def _ensure_headers():
         return False
     _update_values(a1, _HEADERS)
     return True
+
+
+def _sheet_id():
+    data = _request_json("GET", _spreadsheet_url())
+    for sheet in data.get("sheets", []):
+        props = sheet.get("properties", {})
+        if str(props.get("title") or "") == SYSTEME_STUDENTS_SHEET_NAME:
+            return props.get("sheetId")
+    raise RuntimeError(f"Could not find Google Sheet tab '{SYSTEME_STUDENTS_SHEET_NAME}'.")
 
 
 def _find_existing_row(email: str):
@@ -220,6 +243,28 @@ def _pad_row(row, width=5):
     if len(padded) < width:
         padded.extend([""] * (width - len(padded)))
     return padded[:width]
+
+
+def _delete_rows(row_numbers):
+    unique_rows = sorted({int(row) for row in row_numbers if int(row) >= 2}, reverse=True)
+    if not unique_rows:
+        return {}
+    sheet_id = _sheet_id()
+    requests = []
+    for row_number in unique_rows:
+        requests.append(
+            {
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "ROWS",
+                        "startIndex": row_number - 1,
+                        "endIndex": row_number,
+                    }
+                }
+            }
+        )
+    return _spreadsheet_batch_update(requests)
 
 
 def sync_student_record(student: dict, allow_append=True):
@@ -288,6 +333,7 @@ def sync_all_students():
     errors = []
     updates = []
     appends = []
+    duplicates_removed = 0
 
     try:
         values = _get_sheet_values(_sheet_range("A:E"))
@@ -295,9 +341,33 @@ def sync_all_students():
         if headers_missing:
             _update_values(_sheet_range("A1:E1"), _HEADERS)
             values = _get_sheet_values(_sheet_range("A:E"))
+
+        duplicate_rows = []
+        seen_emails = {}
+        for idx, row in enumerate(values[1:], start=2):
+            current = _pad_row(row)
+            email = str(current[0] or "").strip().lower()
+            if not email:
+                continue
+            if email in seen_emails:
+                duplicate_rows.append(idx)
+            else:
+                seen_emails[email] = idx
+
+        if duplicate_rows:
+            _delete_rows(duplicate_rows)
+            duplicates_removed = len(duplicate_rows)
+            values = _get_sheet_values(_sheet_range("A:E"))
     except Exception as exc:
         logger.exception("Failed reading Google Sheet before bulk sync")
-        return {"ok": False, "updated": 0, "appended": 0, "errors": [str(exc)], "students_seen": len(students)}
+        return {
+            "ok": False,
+            "updated": 0,
+            "appended": 0,
+            "duplicates_removed": 0,
+            "errors": [str(exc)],
+            "students_seen": len(students),
+        }
 
     email_to_row = {}
     existing_rows = {}
@@ -345,6 +415,7 @@ def sync_all_students():
         "ok": not errors,
         "updated": updated,
         "appended": appended,
+        "duplicates_removed": duplicates_removed,
         "errors": errors[:10],
         "students_seen": len(students),
     }
