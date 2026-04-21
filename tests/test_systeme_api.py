@@ -124,6 +124,35 @@ class SystemeAPITests(unittest.TestCase):
         self.assertTrue(calls[0]["url"].endswith("/contacts/10/tags"))
         self.assertEqual(calls[0]["json"], {"tagId": 20})
 
+    def test_request_retries_transport_error_before_success(self):
+        calls = []
+
+        def fake_request(method, url, params=None, headers=None, timeout=None, json=None):
+            calls.append({"method": method, "url": url})
+            if len(calls) == 1:
+                raise TimeoutError("read timed out")
+            return _FakeResponse(200, [{"id": 101, "email": "juan@example.com"}])
+
+        with patch.object(systeme_api, "SYSTEME_API_KEY", "test-key"), patch.object(
+            systeme_api, "_AUTH_MODE_CACHE", "x_api_key_header"
+        ), patch("systeme_api.requests.request", side_effect=fake_request), patch(
+            "systeme_api.time.sleep"
+        ):
+            contacts = systeme_api.list_contacts(limit=100, max_pages=1)
+
+        self.assertEqual(len(contacts), 1)
+        self.assertEqual(len(calls), 2)
+
+    def test_list_collection_returns_none_on_transport_failure(self):
+        with patch.object(systeme_api, "SYSTEME_API_KEY", "test-key"), patch.object(
+            systeme_api, "_AUTH_MODE_CACHE", "x_api_key_header"
+        ), patch(
+            "systeme_api.requests.request", side_effect=TimeoutError("read timed out")
+        ), patch("systeme_api.time.sleep"):
+            contacts = systeme_api.list_contacts(limit=100, max_pages=1)
+
+        self.assertIsNone(contacts)
+
 
 if __name__ == "__main__":
     unittest.main()

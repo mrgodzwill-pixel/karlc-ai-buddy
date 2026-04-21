@@ -189,6 +189,24 @@ class SystemeBackfillTests(unittest.TestCase):
         self.assertIn("MikroTik QuickStart: Configure From Scratch", course_names)
         self.assertIn("New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)", course_names)
 
+    def test_run_systeme_backfill_fails_cleanly_when_contacts_timeout(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = os.path.join(tmpdir, "systeme_students.json")
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file), patch(
+                "systeme_backfill.systeme_api.available", return_value=True
+            ), patch(
+                "systeme_backfill.systeme_api.list_courses", return_value=[]
+            ), patch(
+                "systeme_backfill.systeme_api.list_contacts", return_value=None
+            ), patch(
+                "systeme_backfill.systeme_api.list_enrollments", return_value=[]
+            ):
+                result = systeme_backfill.run_systeme_backfill()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "contacts_failed")
+        self.assertIn("timed out", result["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

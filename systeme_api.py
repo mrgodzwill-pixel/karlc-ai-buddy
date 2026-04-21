@@ -9,6 +9,7 @@ one succeeds for the current process.
 
 import logging
 import re
+import time
 from typing import Any
 
 import requests
@@ -31,6 +32,10 @@ class SystemeAPIRequestError(Exception):
     def __init__(self, status_code: int, message: str = ""):
         super().__init__(message or f"Systeme API request failed ({status_code})")
         self.status_code = status_code
+
+
+class SystemeAPITransportError(Exception):
+    pass
 
 
 def available():
@@ -80,7 +85,7 @@ def _extract_error_detail(response):
     return str(payload)[:200]
 
 
-def _request(method, path, *, params=None, headers=None, json_body=None, timeout=20):
+def _request(method, path, *, params=None, headers=None, json_body=None, timeout=20, retries=2):
     global _AUTH_MODE_CACHE
 
     if not available():
@@ -95,18 +100,38 @@ def _request(method, path, *, params=None, headers=None, json_body=None, timeout
 
     for auth_mode in _auth_variants():
         req_params, req_headers = _with_auth(params, base_headers, auth_mode)
-        try:
-            request_kwargs = {
-                "params": req_params,
-                "headers": req_headers,
-                "timeout": timeout,
-            }
-            if json_body is not None:
-                request_kwargs["json"] = json_body
-            response = requests.request(method, url, **request_kwargs)
-        except Exception:
-            logger.exception("Systeme request failed: %s %s", method, path)
-            return None
+        response = None
+        last_exc = None
+        for attempt in range(retries + 1):
+            try:
+                request_kwargs = {
+                    "params": req_params,
+                    "headers": req_headers,
+                    "timeout": timeout,
+                }
+                if json_body is not None:
+                    request_kwargs["json"] = json_body
+                response = requests.request(method, url, **request_kwargs)
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt < retries:
+                    logger.warning(
+                        "Systeme request transport error (%s %s), retry %s/%s: %s",
+                        method,
+                        path,
+                        attempt + 1,
+                        retries,
+                        exc,
+                    )
+                    time.sleep(min(1.5 ** attempt, 3))
+                    continue
+                logger.exception("Systeme request failed: %s %s", method, path)
+                raise SystemeAPITransportError(f"{method} {path} failed: {exc}") from exc
+
+        if response is None and last_exc is not None:
+            raise SystemeAPITransportError(f"{method} {path} failed: {last_exc}")
 
         if response.status_code in (401, 403):
             auth_failures.append(auth_mode)
@@ -181,6 +206,13 @@ def _list_collection(path, *, limit=100, max_pages=50, timeout=20):
                 use_cursor_params = False
                 continue
             logger.warning("Systeme request failed for %s: %s", path, exc)
+            return None
+        except SystemeAPITransportError as exc:
+            logger.warning("Systeme transport failure for %s: %s", path, exc)
+            return None
+
+        if payload is None:
+            logger.warning("Systeme returned no payload for %s", path)
             return None
 
         items = _collection_items(payload)

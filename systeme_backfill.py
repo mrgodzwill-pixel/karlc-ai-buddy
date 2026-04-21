@@ -413,7 +413,7 @@ def _find_snapshot(snapshots, *, email="", contact_id=""):
     return None
 
 
-def run_systeme_backfill(contact_limit=100, contact_max_pages=200, enrollment_limit=100, enrollment_max_pages=200):
+def run_systeme_backfill(contact_limit=100, contact_max_pages=500, enrollment_limit=100, enrollment_max_pages=500):
     """Import historical enrolled students from Systeme.io Public API."""
     if not systeme_api.available():
         return {
@@ -422,22 +422,22 @@ def run_systeme_backfill(contact_limit=100, contact_max_pages=200, enrollment_li
             "message": "Systeme Public API key is not configured yet.",
         }
 
-    courses = systeme_api.list_courses(limit=100, max_pages=10) or []
-    contacts = systeme_api.list_contacts(limit=contact_limit, max_pages=contact_max_pages)
-    enrollments = systeme_api.list_enrollments(limit=enrollment_limit, max_pages=enrollment_max_pages)
+    courses = systeme_api.list_courses(limit=100, max_pages=10, timeout=45) or []
+    contacts = systeme_api.list_contacts(limit=contact_limit, max_pages=contact_max_pages, timeout=45)
+    enrollments = systeme_api.list_enrollments(limit=enrollment_limit, max_pages=enrollment_max_pages, timeout=45)
 
     if contacts is None:
         return {
             "ok": False,
             "reason": "contacts_failed",
-            "message": "Systeme contact backfill failed. Check API key/auth.",
+            "message": "Systeme contact backfill failed or timed out. Try `/systeme_sync` again in a bit.",
         }
 
     if enrollments is None:
         return {
             "ok": False,
             "reason": "enrollments_failed",
-            "message": "Systeme enrollment backfill failed. Check API key/auth.",
+            "message": "Systeme enrollment backfill failed or timed out. Try `/systeme_sync` again in a bit.",
         }
 
     course_lookup = {_coerce_id(course.get("id")): course for course in courses if isinstance(course, dict)}
