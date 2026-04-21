@@ -142,6 +142,57 @@ class GoogleSheetSyncTests(unittest.TestCase):
         mock_batch_update.assert_called_once()
         mock_append.assert_called_once()
 
+    def test_sync_all_students_updates_same_row_when_student_gets_second_course(self):
+        google_sheet_sync = importlib.import_module("google_sheet_sync")
+
+        students = {
+            "students": [
+                {
+                    "email": "same@example.com",
+                    "name": "Same Student",
+                    "phone": "639111111111",
+                    "courses": [
+                        {"name": "MikroTik QuickStart: Configure From Scratch"},
+                        {"name": "MikroTik Traffic Control Basics"},
+                    ],
+                    "tags": ["QUICKSTART_PAID", "TRAFFIC_PAID"],
+                }
+            ]
+        }
+
+        existing_sheet_rows = [
+            ["email", "courses", "tags", "name", "phone"],
+            [
+                "same@example.com",
+                "MikroTik QuickStart: Configure From Scratch",
+                "QUICKSTART_PAID",
+                "Same Student",
+                "639111111111",
+            ],
+        ]
+
+        with patch.object(google_sheet_sync, "available", return_value=True), \
+             patch.object(google_sheet_sync, "load_student_store", return_value=students), \
+             patch.object(google_sheet_sync, "_get_sheet_values", return_value=existing_sheet_rows), \
+             patch.object(google_sheet_sync, "_update_values") as mock_update_values, \
+             patch.object(google_sheet_sync, "_batch_update_values") as mock_batch_update, \
+             patch.object(google_sheet_sync, "_append_values") as mock_append:
+            result = google_sheet_sync.sync_all_students()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(result["appended"], 0)
+        mock_update_values.assert_not_called()
+        mock_batch_update.assert_called_once()
+        update_payload = mock_batch_update.call_args[0][0][0]
+        self.assertEqual(update_payload["range"], "Sheet1!A2:E2")
+        self.assertEqual(
+            update_payload["values"][0][1],
+            "MikroTik QuickStart: Configure From Scratch, MikroTik Traffic Control Basics",
+        )
+        self.assertEqual(update_payload["values"][0][2], "QUICKSTART_PAID, TRAFFIC_PAID")
+        mock_append.assert_not_called()
+
     def test_sync_all_students_removes_duplicate_email_rows_before_updating(self):
         google_sheet_sync = importlib.import_module("google_sheet_sync")
 
