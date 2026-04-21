@@ -93,13 +93,35 @@ def _course_aliases():
     return aliases
 
 
+def _course_query_variants(course_query):
+    raw = str(course_query or "").strip()
+    variants = []
+
+    def add(value):
+        normalized = _normalize(value)
+        if normalized and normalized not in variants:
+            variants.append(normalized)
+
+    add(raw)
+    cleaned = re.sub(r"\s*-\s*invoice\s+for\s+.+$", "", raw, flags=re.IGNORECASE).strip()
+    add(cleaned)
+    cleaned = re.sub(r"^invoice\s+paid\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    add(cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:.")
+    add(cleaned)
+    return variants
+
+
 def _course_key_from_query(course_query):
-    query = _normalize(course_query)
-    if not query:
+    queries = _course_query_variants(course_query)
+    if not queries:
         return ""
 
     exact_title_map = {
         _normalize("MikroTik QuickStart: Configure From Scratch"): "mikrotik_basic",
+        _normalize("Step-by-step kung paano mag-setup ng MikroTik RouterOS from scratch."): "mikrotik_basic",
+        _normalize("Step-by-step kung paano mag-setup ng MikroTik RouterOS from scratch"): "mikrotik_basic",
+        _normalize("MikroTik RouterOS from scratch"): "mikrotik_basic",
         _normalize("New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)"): "mikrotik_dual_isp",
         _normalize("Hybrid Access Combo: IPoE + PPPoE"): "mikrotik_hybrid",
         _normalize("MikroTik Traffic Control Basics"): "mikrotik_traffic",
@@ -110,25 +132,28 @@ def _course_key_from_query(course_query):
         _normalize("10G Core Part 3: Centralized Pisowifi Setup"): "pisowifi",
         _normalize("Complete MikroTik Mastery Bundle"): "bundle4",
     }
-    if query in exact_title_map:
-        return exact_title_map[query]
+    for query in queries:
+        if query in exact_title_map:
+            return exact_title_map[query]
 
     aliases = _course_aliases()
-    canonical = aliases.get(query, "")
-    if canonical:
-        for course_key, course in COURSES.items():
-            if _normalize(course.get("name")) == _normalize(canonical):
-                return course_key
+    for query in queries:
+        canonical = aliases.get(query, "")
+        if canonical:
+            for course_key, course in COURSES.items():
+                if _normalize(course.get("name")) == _normalize(canonical):
+                    return course_key
 
-    for course_key, course in COURSES.items():
-        canonical_name = _normalize(course.get("name"))
-        if query == canonical_name or query in canonical_name:
-            return course_key
-        keywords = [_normalize(keyword) for keyword in course.get("keywords", [])]
-        if query in keywords:
-            return course_key
-        if any(query in keyword for keyword in keywords):
-            return course_key
+    for query in queries:
+        for course_key, course in COURSES.items():
+            canonical_name = _normalize(course.get("name"))
+            if query == canonical_name or query in canonical_name or canonical_name in query:
+                return course_key
+            keywords = [_normalize(keyword) for keyword in course.get("keywords", [])]
+            if query in keywords:
+                return course_key
+            if any(query in keyword or keyword in query for keyword in keywords):
+                return course_key
 
     return ""
 

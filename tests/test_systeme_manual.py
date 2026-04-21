@@ -125,6 +125,31 @@ class SystemeManualTests(unittest.TestCase):
         assign_tag.assert_called_once_with("501", "88")
         self.assertEqual(result["tag"]["name"], "OLD_BUNDLE")
 
+    def test_enroll_student_maps_invoice_style_old_title_to_quickstart_tag(self):
+        contact = {"id": 501, "email": "ericjamison21@gmail.com"}
+        tag = {"id": 99, "name": "QUICKSTART_PAID"}
+        course_query = "Step-by-step kung paano mag-setup ng MikroTik RouterOS from scratch. - Invoice for Eric John Jamison"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = os.path.join(tmpdir, "systeme_students.json")
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file), patch(
+                "systeme_manual.systeme_api.available", return_value=True
+            ), patch(
+                "systeme_manual.systeme_api.create_contact", return_value=contact
+            ), patch(
+                "systeme_manual.systeme_api.find_tag_by_name", return_value=tag
+            ), patch(
+                "systeme_manual.systeme_api.assign_tag_to_contact", return_value={}
+            ) as assign_tag:
+                result = systeme_manual.enroll_student(
+                    email="ericjamison21@gmail.com",
+                    course_query=course_query,
+                    name="Eric John Jamison",
+                )
+
+        assign_tag.assert_called_once_with("501", "99")
+        self.assertEqual(result["tag"]["name"], "QUICKSTART_PAID")
+
     def test_sanitize_name_fields_truncates_long_names(self):
         first_name, surname, full_name = systeme_manual._sanitize_name_fields(
             "A" * 120,
