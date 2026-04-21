@@ -44,6 +44,48 @@ class GoogleSheetSyncTests(unittest.TestCase):
             importlib.reload(google_sheet_sync)
             self.assertTrue(google_sheet_sync.available())
 
+    def test_sync_all_students_batches_updates_and_appends(self):
+        google_sheet_sync = importlib.import_module("google_sheet_sync")
+
+        students = {
+            "students": [
+                {
+                    "email": "existing@example.com",
+                    "name": "Existing Updated",
+                    "phone": "639111111111",
+                    "courses": [{"name": "Course A"}],
+                    "tags": ["TAG_A"],
+                },
+                {
+                    "email": "new@example.com",
+                    "name": "New Student",
+                    "phone": "639222222222",
+                    "courses": [{"name": "Course B"}],
+                    "tags": ["TAG_B"],
+                },
+            ]
+        }
+
+        existing_sheet_rows = [
+            ["email", "courses", "tags", "name", "phone"],
+            ["existing@example.com", "• Old Course", "• OLD_TAG", "Old Name", ""],
+        ]
+
+        with patch.object(google_sheet_sync, "available", return_value=True), \
+             patch.object(google_sheet_sync, "load_student_store", return_value=students), \
+             patch.object(google_sheet_sync, "_get_sheet_values", return_value=existing_sheet_rows), \
+             patch.object(google_sheet_sync, "_update_values") as mock_update_values, \
+             patch.object(google_sheet_sync, "_batch_update_values") as mock_batch_update, \
+             patch.object(google_sheet_sync, "_append_values") as mock_append:
+            result = google_sheet_sync.sync_all_students()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(result["appended"], 1)
+        mock_update_values.assert_not_called()
+        mock_batch_update.assert_called_once()
+        mock_append.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

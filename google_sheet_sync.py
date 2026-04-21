@@ -9,6 +9,7 @@ This module is optional at runtime. It only activates when both:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Iterable
 
 from config import (
@@ -22,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 _HEADERS = [["email", "courses", "tags", "name", "phone"]]
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+_BATCH_SIZE = 200
 
 
 def available():
@@ -63,6 +66,10 @@ def _append_url(a1_range: str):
     )
 
 
+def _batch_update_url():
+    return f"https://sheets.googleapis.com/v4/spreadsheets/{SYSTEME_STUDENTS_SHEET_ID}/values:batchUpdate"
+
+
 def _sheet_range(a1_suffix: str):
     return f"{SYSTEME_STUDENTS_SHEET_NAME}!{a1_suffix}"
 
@@ -94,33 +101,62 @@ def _student_row_values(student: dict):
     ]
 
 
-def _get_sheet_values(a1_range: str):
+def _request_json(method: str, url: str, *, params=None, json=None, retries=5):
     session = _authorized_session()
-    response = session.get(_values_url(a1_range))
-    response.raise_for_status()
-    return response.json().get("values", [])
+
+    for attempt in range(retries):
+        response = session.request(method, url, params=params, json=json)
+        if response.status_code in _RETRYABLE_STATUS_CODES and attempt < retries - 1:
+            wait_seconds = min(2 ** attempt, 8)
+            logger.warning(
+                "Google Sheets API %s %s returned %s; retrying in %ss",
+                method,
+                url,
+                response.status_code,
+                wait_seconds,
+            )
+            time.sleep(wait_seconds)
+            continue
+
+        response.raise_for_status()
+        if not response.text.strip():
+            return {}
+        return response.json()
+
+    return {}
+
+
+def _get_sheet_values(a1_range: str):
+    data = _request_json("GET", _values_url(a1_range))
+    return data.get("values", [])
 
 
 def _update_values(a1_range: str, values):
-    session = _authorized_session()
-    response = session.put(
+    return _request_json(
+        "PUT",
         _values_url(a1_range),
         params={"valueInputOption": "RAW"},
         json={"range": a1_range, "majorDimension": "ROWS", "values": values},
     )
-    response.raise_for_status()
-    return response.json()
 
 
 def _append_values(a1_range: str, values):
-    session = _authorized_session()
-    response = session.post(
+    return _request_json(
+        "POST",
         _append_url(a1_range),
         params={"valueInputOption": "RAW", "insertDataOption": "INSERT_ROWS"},
         json={"range": a1_range, "majorDimension": "ROWS", "values": values},
     )
-    response.raise_for_status()
-    return response.json()
+
+
+def _batch_update_values(updates):
+    if not updates:
+        return {}
+    return _request_json(
+        "POST",
+        _batch_update_url(),
+        json={"valueInputOption": "RAW", "data": updates},
+    )
 
 
 def _ensure_headers():
@@ -138,6 +174,13 @@ def _find_existing_row(email: str):
         if str((row[0] if row else "") or "").strip().lower() == email:
             return idx
     return None
+
+
+def _pad_row(row, width=5):
+    padded = list(row or [])
+    if len(padded) < width:
+        padded.extend([""] * (width - len(padded)))
+    return padded[:width]
 
 
 def sync_student_record(student: dict, allow_append=True):
@@ -204,20 +247,60 @@ def sync_all_students():
     updated = 0
     appended = 0
     errors = []
+    updates = []
+    appends = []
+
+    try:
+        values = _get_sheet_values(_sheet_range("A:E"))
+        headers_missing = not values or _pad_row(values[0]) != _HEADERS[0]
+        if headers_missing:
+            _update_values(_sheet_range("A1:E1"), _HEADERS)
+            values = _get_sheet_values(_sheet_range("A:E"))
+    except Exception as exc:
+        logger.exception("Failed reading Google Sheet before bulk sync")
+        return {"ok": False, "updated": 0, "appended": 0, "errors": [str(exc)], "students_seen": len(students)}
+
+    email_to_row = {}
+    existing_rows = {}
+    for idx, row in enumerate(values[1:], start=2):
+        current = _pad_row(row)
+        email = str(current[0] or "").strip().lower()
+        if not email:
+            continue
+        email_to_row[email] = idx
+        existing_rows[idx] = current
 
     for student in students:
-        try:
-            result = sync_student_record(student, allow_append=True)
-            if result.get("ok"):
-                if result.get("action") == "updated":
-                    updated += 1
-                elif result.get("action") == "appended":
-                    appended += 1
-            else:
-                errors.append(result.get("message", "Unknown sync error"))
-        except Exception as exc:
-            logger.exception("Failed syncing student %s to Google Sheet", student.get("email", ""))
-            errors.append(str(exc))
+        email = str(student.get("email") or "").strip().lower()
+        if not email:
+            errors.append("Student email is required.")
+            continue
+
+        desired = _student_row_values(student)
+        row_number = email_to_row.get(email)
+        if row_number:
+            current = existing_rows.get(row_number, ["", "", "", "", ""])
+            if current != desired:
+                updates.append(
+                    {
+                        "range": _sheet_range(f"A{row_number}:E{row_number}"),
+                        "majorDimension": "ROWS",
+                        "values": [desired],
+                    }
+                )
+                updated += 1
+        else:
+            appends.append(desired)
+            appended += 1
+
+    try:
+        for start in range(0, len(updates), _BATCH_SIZE):
+            _batch_update_values(updates[start : start + _BATCH_SIZE])
+        for start in range(0, len(appends), _BATCH_SIZE):
+            _append_values(_sheet_range("A:E"), appends[start : start + _BATCH_SIZE])
+    except Exception as exc:
+        logger.exception("Failed bulk syncing students to Google Sheet")
+        errors.append(str(exc))
 
     return {
         "ok": not errors,
