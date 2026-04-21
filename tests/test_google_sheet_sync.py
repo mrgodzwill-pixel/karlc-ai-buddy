@@ -42,7 +42,7 @@ class GoogleSheetSyncTests(unittest.TestCase):
                     {"name": "â¢ MikroTik QuickStart: Configure From Scratch"},
                     {"name": "Ã¢ÂÂ¢ Hybrid Access Combo: IPoE + PPPoE"},
                 ],
-                "tags": ["500OFF_FOR_VERIFICATION", "â¢ QUICKSTART_PAID"],
+                "tags": ["500OFF_FOR_VERIFICATION", "500OFF_VERIFIED", "â¢ QUICKSTART_PAID"],
             }
         )
 

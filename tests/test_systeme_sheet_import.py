@@ -59,7 +59,7 @@ class SystemeSheetImportTests(unittest.TestCase):
     def test_import_summary_csv_text_cleans_weird_bullets_and_ignores_discount_tag(self):
         csv_text = (
             "email,courses,tags\n"
-            "\"juan@example.com\",\"â¢ MikroTik QuickStart: Configure From Scratch, Ã¢ÂÂ¢ Hybrid Access Combo: IPoE + PPPoE, Hybrid Access Combo: IPoE + PPPoE\",\"500OFF_FOR_VERIFICATION, â¢ QUICKSTART_PAID, Ã¢ÂÂ¢ HYBRID_PAID\"\n"
+            "\"juan@example.com\",\"â¢ MikroTik QuickStart: Configure From Scratch, Ã¢ÂÂ¢ Hybrid Access Combo: IPoE + PPPoE, Hybrid Access Combo: IPoE + PPPoE\",\"500OFF_FOR_VERIFICATION, 500OFF_VERIFIED, â¢ QUICKSTART_PAID, Ã¢ÂÂ¢ HYBRID_PAID\"\n"
         )
 
         with patch("systeme_sheet_import.upsert_systeme_student_snapshot", return_value=True) as mock_upsert:

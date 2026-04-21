@@ -64,7 +64,10 @@ SYSTEME_TAG_PISOWIFI = os.environ.get("SYSTEME_TAG_PISOWIFI", "PISOWIFI_PAID")
 SYSTEME_TAG_BUNDLE4 = os.environ.get("SYSTEME_TAG_BUNDLE4", "BUNDLE4_PAID")
 SYSTEME_SHEET_EXCLUDED_TAGS = {
     str(tag).strip().lower()
-    for tag in os.environ.get("SYSTEME_SHEET_EXCLUDED_TAGS", "500off_for_verification").split(",")
+    for tag in os.environ.get(
+        "SYSTEME_SHEET_EXCLUDED_TAGS",
+        "500off_for_verification,500off_verified",
+    ).split(",")
     if str(tag).strip()
 }
 
