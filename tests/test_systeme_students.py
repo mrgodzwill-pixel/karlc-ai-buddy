@@ -129,19 +129,34 @@ class SystemeStudentsTests(unittest.TestCase):
             },
             "created_at": "2026-04-21T11:00:00+00:00",
         }
+        payload_c = {
+            "type": "contact.course.enrolled",
+            "data": {
+                "course": {"id": 2, "name": "MikroTik Hybrid"},
+                "contact": {
+                    "email": "a@example.com",
+                    "fields": {"first_name": "Alpha", "surname": "One"},
+                },
+            },
+            "created_at": "2026-04-21T12:00:00+00:00",
+        }
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store_file = f"{tmpdir}/systeme_students.json"
             with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file):
                 systeme_students.upsert_systeme_student(payload_a)
                 systeme_students.upsert_systeme_student(payload_b)
+                systeme_students.upsert_systeme_student(payload_c)
                 summary = systeme_students.format_course_enrollment_summary()
                 filtered = systeme_students.format_course_enrollment_summary("basic")
 
-        self.assertIn("*MikroTik Basic* (2)", summary)
-        self.assertIn("Alpha One - a@example.com", summary)
-        self.assertIn("Bravo Two - b@example.com", summary)
-        self.assertIn("*MikroTik Basic* (2)", filtered)
+        self.assertIn("MikroTik Basic | 2 students total", summary)
+        self.assertIn("MikroTik Hybrid | 1 students total", summary)
+        self.assertIn("Courses shown: 2", summary)
+        self.assertIn("Known enrolled student-course rows: 3", summary)
+        self.assertNotIn("Alpha One - a@example.com", summary)
+        self.assertIn("MikroTik Basic | 2 students total", filtered)
+        self.assertIn("Courses shown: 1", filtered)
 
 
 if __name__ == "__main__":

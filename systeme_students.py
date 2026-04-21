@@ -618,8 +618,8 @@ def format_student_lookup_summary(user_message, limit=5):
     }
 
 
-def format_course_enrollment_summary(course_query="", max_students_per_course=50):
-    """Format enrolled students grouped by course for Telegram/chat."""
+def format_course_enrollment_summary(course_query=""):
+    """Format enrolled students grouped by course as summary counts for Telegram/chat."""
     store = load_student_store()
     students = store.get("students", [])
     checked_at = _parse_timestamp(store.get("checked_at", ""))
@@ -628,8 +628,6 @@ def format_course_enrollment_summary(course_query="", max_students_per_course=50
 
     grouped = {}
     for student in students:
-        name = str(student.get("name") or "").strip() or str(student.get("email") or "Unknown").strip()
-        email = str(student.get("email") or "").strip().lower()
         for course in student.get("courses", []):
             if str(course.get("status") or "").lower() != "enrolled":
                 continue
@@ -638,14 +636,14 @@ def format_course_enrollment_summary(course_query="", max_students_per_course=50
                 continue
             if query and query not in course_name.lower():
                 continue
-            grouped.setdefault(course_name, [])
-            grouped[course_name].append(
-                {
-                    "name": name,
-                    "email": email,
-                    "date": course.get("date", ""),
-                }
+            grouped.setdefault(course_name, set())
+            unique_key = (
+                str(student.get("email") or "").strip().lower()
+                or str(student.get("contact_id") or "").strip()
+                or str(student.get("name") or "").strip().lower()
             )
+            if unique_key:
+                grouped[course_name].add(unique_key)
 
     if not grouped:
         if query:
@@ -661,25 +659,13 @@ def format_course_enrollment_summary(course_query="", max_students_per_course=50
         )
 
     lines = ["📚 *Systeme Students by Course*", f"Last synced: {checked_label}", ""]
-    total_students = 0
+    total_rows = 0
     for course_name in sorted(grouped):
-        entries = grouped[course_name]
-        entries.sort(
-            key=lambda item: _parse_timestamp(item.get("date")) or datetime.min.replace(tzinfo=PHT),
-            reverse=True,
-        )
-        lines.append(f"*{course_name}* ({len(entries)})")
-        shown = 0
-        for item in entries:
-            if shown >= max_students_per_course:
-                remaining = len(entries) - shown
-                if remaining > 0:
-                    lines.append(f"…and {remaining} more")
-                break
-            lines.append(f"• {item['name']} - {item['email'] or 'no email'}")
-            shown += 1
-            total_students += 1
-        lines.append("")
+        count = len(grouped[course_name])
+        total_rows += count
+        lines.append(f"• {course_name} | {count} students total")
 
-    lines.append(f"Known enrolled student rows shown: {total_students}")
+    lines.append("")
+    lines.append(f"Courses shown: {len(grouped)}")
+    lines.append(f"Known enrolled student-course rows: {total_rows}")
     return "\n".join(lines)
