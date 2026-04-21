@@ -56,6 +56,26 @@ class SystemeSheetImportTests(unittest.TestCase):
         )
         self.assertEqual(snapshot["tags"], ["QUICKSTART_PAID", "HYBRID_PAID"])
 
+    def test_import_summary_csv_text_cleans_weird_bullets_and_ignores_discount_tag(self):
+        csv_text = (
+            "email,courses,tags\n"
+            "\"juan@example.com\",\"â¢ MikroTik QuickStart: Configure From Scratch, Ã¢ÂÂ¢ Hybrid Access Combo: IPoE + PPPoE, Hybrid Access Combo: IPoE + PPPoE\",\"500OFF_FOR_VERIFICATION, â¢ QUICKSTART_PAID, Ã¢ÂÂ¢ HYBRID_PAID\"\n"
+        )
+
+        with patch("systeme_sheet_import.upsert_systeme_student_snapshot", return_value=True) as mock_upsert:
+            result = systeme_sheet_import.import_summary_csv_text(csv_text, source_label="test.csv")
+
+        self.assertTrue(result["ok"])
+        snapshot = mock_upsert.call_args[0][0]
+        self.assertEqual(
+            [course["name"] for course in snapshot["courses"]],
+            [
+                "MikroTik QuickStart: Configure From Scratch",
+                "Hybrid Access Combo: IPoE + PPPoE",
+            ],
+        )
+        self.assertEqual(snapshot["tags"], ["QUICKSTART_PAID", "HYBRID_PAID"])
+
     def test_import_summary_csv_text_enriches_name_and_phone_from_xendit(self):
         csv_text = (
             "email,courses,tags\n"

@@ -19,6 +19,7 @@ from urllib.request import urlopen
 from config import (
     SYSTEME_STUDENTS_BASELINE_CSV_URL,
     SYSTEME_STUDENTS_BASELINE_LOCAL_CSV,
+    SYSTEME_SHEET_EXCLUDED_TAGS,
 )
 from systeme_students import upsert_systeme_student_snapshot
 from xendit_payments import find_payment_by_email
@@ -36,16 +37,25 @@ def _now_iso():
 
 def _split_list_values(value):
     lines = []
+    seen = set()
     for raw_line in str(value or "").splitlines():
         for raw_part in str(raw_line).split(","):
             line = str(raw_part).strip()
             if not line:
                 continue
-            if line.startswith("•"):
-                line = line[1:].strip()
-            elif line.startswith("-"):
-                line = line[1:].strip()
+            while True:
+                original = line
+                for prefix in ("Ã¢ÂÂ¢", "â¢", "•", "-"):
+                    if line.startswith(prefix):
+                        line = line[len(prefix):].strip()
+                if line == original:
+                    break
+            line = line.strip(" ,")
             if line:
+                key = line.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
                 lines.append(line)
     return lines
 
@@ -56,7 +66,11 @@ def _row_to_snapshot(row, imported_at):
         return None
 
     course_names = _split_list_values(row.get("courses") or row.get("Courses") or "")
-    tags = _split_list_values(row.get("tags") or row.get("Tags") or "")
+    tags = [
+        tag
+        for tag in _split_list_values(row.get("tags") or row.get("Tags") or "")
+        if tag.lower() not in SYSTEME_SHEET_EXCLUDED_TAGS
+    ]
 
     courses = [
         {

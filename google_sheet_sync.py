@@ -15,6 +15,7 @@ from typing import Iterable
 from config import (
     SYSTEME_STUDENTS_SHEET_ID,
     SYSTEME_STUDENTS_SHEET_NAME,
+    SYSTEME_SHEET_EXCLUDED_TAGS,
     get_google_service_account_info,
 )
 from systeme_students import load_student_store
@@ -25,6 +26,7 @@ _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 _HEADERS = [["email", "courses", "tags", "name", "phone"]]
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 _BATCH_SIZE = 200
+_BULLET_PREFIXES = ("Ã¢ÂÂ¢", "â¢", "•", "-")
 
 
 def available():
@@ -74,14 +76,29 @@ def _sheet_range(a1_suffix: str):
     return f"{SYSTEME_STUDENTS_SHEET_NAME}!{a1_suffix}"
 
 
-def _normalize_list(values: Iterable[str]):
+def _clean_list_value(value: str):
+    cleaned = str(value or "").strip()
+    while True:
+        original = cleaned
+        for prefix in _BULLET_PREFIXES:
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):].strip()
+        if cleaned == original:
+            break
+    return cleaned.strip(" ,")
+
+
+def _normalize_list(values: Iterable[str], *, excluded_values=None):
+    excluded = {str(value).strip().lower() for value in (excluded_values or set()) if str(value).strip()}
     ordered = []
     seen = set()
     for raw in values or []:
-        value = str(raw or "").strip()
+        value = _clean_list_value(raw)
         if not value:
             continue
         key = value.lower()
+        if key in excluded:
+            continue
         if key in seen:
             continue
         seen.add(key)
@@ -95,7 +112,7 @@ def _student_row_values(student: dict):
     return [
         str(student.get("email") or "").strip().lower(),
         _normalize_list(courses),
-        _normalize_list(tags),
+        _normalize_list(tags, excluded_values=SYSTEME_SHEET_EXCLUDED_TAGS),
         str(student.get("name") or "").strip(),
         str(student.get("phone") or "").strip(),
     ]

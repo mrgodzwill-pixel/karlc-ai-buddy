@@ -30,6 +30,28 @@ class GoogleSheetSyncTests(unittest.TestCase):
         self.assertEqual(row[3], "Juan Dela Cruz")
         self.assertEqual(row[4], "639171234567")
 
+    def test_student_row_values_excludes_discount_verification_tag_and_cleans_bullets(self):
+        google_sheet_sync = importlib.import_module("google_sheet_sync")
+
+        row = google_sheet_sync._student_row_values(
+            {
+                "email": "juan@example.com",
+                "name": "Juan Dela Cruz",
+                "phone": "639171234567",
+                "courses": [
+                    {"name": "â¢ MikroTik QuickStart: Configure From Scratch"},
+                    {"name": "Ã¢ÂÂ¢ Hybrid Access Combo: IPoE + PPPoE"},
+                ],
+                "tags": ["500OFF_FOR_VERIFICATION", "â¢ QUICKSTART_PAID"],
+            }
+        )
+
+        self.assertEqual(
+            row[1],
+            "MikroTik QuickStart: Configure From Scratch, Hybrid Access Combo: IPoE + PPPoE",
+        )
+        self.assertEqual(row[2], "QUICKSTART_PAID")
+
     def test_available_requires_sheet_id_and_google_credentials(self):
         with patch.dict(
             os.environ,

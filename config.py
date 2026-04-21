@@ -62,6 +62,11 @@ SYSTEME_TAG_FTTH = os.environ.get("SYSTEME_TAG_FTTH", "FTTH_PAID")
 SYSTEME_TAG_SOLAR = os.environ.get("SYSTEME_TAG_SOLAR", "SOLAR_PAID")
 SYSTEME_TAG_PISOWIFI = os.environ.get("SYSTEME_TAG_PISOWIFI", "PISOWIFI_PAID")
 SYSTEME_TAG_BUNDLE4 = os.environ.get("SYSTEME_TAG_BUNDLE4", "BUNDLE4_PAID")
+SYSTEME_SHEET_EXCLUDED_TAGS = {
+    str(tag).strip().lower()
+    for tag in os.environ.get("SYSTEME_SHEET_EXCLUDED_TAGS", "500off_for_verification").split(",")
+    if str(tag).strip()
+}
 
 # === Gmail IMAP Config (for enrollment checker & Xendit lookups) ===
 # See gmail_imap.py. Enable by setting GMAIL_USER and GMAIL_APP_PASSWORD
