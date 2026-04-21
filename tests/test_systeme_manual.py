@@ -101,6 +101,40 @@ class SystemeManualTests(unittest.TestCase):
         assign_tag.assert_called_once_with("501", "77")
         self.assertEqual(result["tag"]["name"], "BUNDLE4_PAID")
 
+    def test_enroll_student_uses_old_bundle_fallback_tag_for_unknown_legacy_course(self):
+        contact = {"id": 501, "email": "juan@example.com"}
+        tag = {"id": 88, "name": "OLD_BUNDLE"}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = os.path.join(tmpdir, "systeme_students.json")
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file), patch(
+                "systeme_manual.systeme_api.available", return_value=True
+            ), patch(
+                "systeme_manual.systeme_api.create_contact", return_value=contact
+            ), patch(
+                "systeme_manual.systeme_api.find_tag_by_name", return_value=tag
+            ), patch(
+                "systeme_manual.systeme_api.assign_tag_to_contact", return_value={}
+            ) as assign_tag:
+                result = systeme_manual.enroll_student(
+                    email="juan@example.com",
+                    course_query="Some Old 3-in-1 Bundle 2024",
+                    name="Juan Dela Cruz",
+                )
+
+        assign_tag.assert_called_once_with("501", "88")
+        self.assertEqual(result["tag"]["name"], "OLD_BUNDLE")
+
+    def test_sanitize_name_fields_truncates_long_names(self):
+        first_name, surname, full_name = systeme_manual._sanitize_name_fields(
+            "A" * 120,
+            email="juan@example.com",
+        )
+
+        self.assertLessEqual(len(first_name), 64)
+        self.assertLessEqual(len(full_name), 64)
+        self.assertTrue(full_name)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -225,8 +225,8 @@ class SystemeBackfillTests(unittest.TestCase):
                 result = systeme_backfill.run_systeme_backfill()
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["students_imported"], 0)
-        self.assertEqual(result["students_without_recognized_courses"], 1)
+        self.assertEqual(result["students_imported"], 1)
+        self.assertEqual(result["students_without_recognized_courses"], 0)
         self.assertIn("OLD_HYBRID_PAID", result["unknown_paid_tags"])
 
     def test_run_systeme_backfill_merges_duplicate_contacts_by_email(self):

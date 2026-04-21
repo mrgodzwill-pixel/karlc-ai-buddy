@@ -910,12 +910,12 @@ def process_message(text):
         send_systeme_students(course_query=course_query)
         return "students"
 
-    if text_lower in ["/systeme_sync", "/systemesync", "/backfill_systeme"]:
+    if text_lower in ["/systeme_sync", "/systemesync", "/backfill_systeme", "/systemesync"]:
         if send_systeme_backfill():
             send_message("⏳ Running Systeme API backfill... this may take a bit, sandali lang Boss!")
         return "systeme_sync"
 
-    if tokens and tokens[0] in ["/systeme_add", "/contact_add", "/add_contact"]:
+    if tokens and tokens[0] in ["/systeme_add", "/systemeadd", "/contact_add", "/add_contact"]:
         try:
             parsed = _parse_systeme_add_command(text)
             send_message("⏳ Creating Systeme contact... sandali lang Boss!")
@@ -924,7 +924,7 @@ def process_message(text):
             send_message(f"❌ {str(e)[:250]}")
         return "systeme_add"
 
-    if tokens and tokens[0] in ["/systeme_enroll", "/enroll_student", "/manual_enroll"]:
+    if tokens and tokens[0] in ["/systeme_enroll", "/systemeenroll", "/enroll_student", "/manual_enroll"]:
         try:
             parsed = _parse_systeme_enroll_command(text)
             send_message("⏳ Enrolling student in Systeme... sandali lang Boss!")

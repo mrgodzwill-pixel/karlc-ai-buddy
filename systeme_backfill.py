@@ -321,12 +321,21 @@ def _merge_snapshot(existing, incoming):
 def _tag_course_mapping():
     mapping = {}
 
-    def add(tag_name, course_name, kind="course"):
+    def variants(tag_name):
         normalized = _lower(tag_name)
-        if normalized:
-            mapping[normalized] = {"name": course_name, "kind": kind}
-            automatic_variant = _lower(f"XENDIT_{tag_name}")
-            mapping[automatic_variant] = {"name": course_name, "kind": kind}
+        compact = re.sub(r"[^a-z0-9]+", "", normalized)
+        values = {normalized}
+        if compact:
+            values.add(compact)
+        return {value for value in values if value}
+
+    def register(tag_name, course_name, kind="course"):
+        for variant in variants(tag_name):
+            mapping[variant] = {"name": course_name, "kind": kind}
+
+    def add(tag_name, course_name, kind="course"):
+        register(tag_name, course_name, kind=kind)
+        register(f"XENDIT_{tag_name}", course_name, kind=kind)
 
     add(SYSTEME_TAG_MIKROTIK_BASIC, "MikroTik QuickStart: Configure From Scratch")
     add(SYSTEME_TAG_MIKROTIK_DUAL_ISP, "New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)")
@@ -338,6 +347,12 @@ def _tag_course_mapping():
     add(SYSTEME_TAG_SOLAR, "DIY Hybrid Solar Setup")
     add(SYSTEME_TAG_PISOWIFI, "10G Core Part 3: Centralized Pisowifi Setup")
     add(SYSTEME_TAG_BUNDLE4, "Complete MikroTik Mastery Bundle", kind="course_bundle")
+    register("BASICPAID", "MikroTik QuickStart: Configure From Scratch")
+    register("XENDITBASICPAID", "MikroTik QuickStart: Configure From Scratch")
+    register("BUNDLEPAID", "OLD Bundle Access", kind="course_bundle")
+    register("XENDITBUNDLEPAID", "OLD Bundle Access", kind="course_bundle")
+    register("3-IN-1PAID", "OLD Bundle Access", kind="course_bundle")
+    register("3IN1PAID", "OLD Bundle Access", kind="course_bundle")
     return mapping
 
 
@@ -346,6 +361,8 @@ def _courses_from_contact_tags(contact):
     event_at = _extract_timestamp(contact) or _now_iso()
     courses = []
     seen = set()
+    has_old_bundle = False
+    has_old_course = False
 
     for tag in contact.get("tags") or []:
         if isinstance(tag, dict):
@@ -355,8 +372,15 @@ def _courses_from_contact_tags(contact):
             tag_name = _string(tag)
             tag_id = ""
 
-        mapped = mapping.get(_lower(tag_name))
+        normalized = _lower(tag_name)
+        compact = re.sub(r"[^a-z0-9]+", "", normalized)
+        mapped = mapping.get(normalized) or mapping.get(compact)
         if not mapped:
+            if ("paid" in compact or compact.startswith("xendit")) and compact:
+                if "bundle" in compact or "3in1" in compact:
+                    has_old_bundle = True
+                else:
+                    has_old_course = True
             continue
 
         key = (_lower(mapped["name"]), mapped["kind"])
@@ -372,6 +396,31 @@ def _courses_from_contact_tags(contact):
                 "status": "enrolled",
                 "date": event_at,
                 "source_event": "api.backfill.tag",
+            }
+        )
+
+    if has_old_bundle and ("old bundle access", "course_bundle") not in seen:
+        courses.append(
+            {
+                "id": "",
+                "name": "OLD Bundle Access",
+                "kind": "course_bundle",
+                "status": "enrolled",
+                "date": event_at,
+                "source_event": "api.backfill.tag.old_bundle",
+            }
+        )
+        seen.add(("old bundle access", "course_bundle"))
+
+    if has_old_course and ("old course access", "course") not in seen:
+        courses.append(
+            {
+                "id": "",
+                "name": "OLD Course Access",
+                "kind": "course",
+                "status": "enrolled",
+                "date": event_at,
+                "source_event": "api.backfill.tag.old_course",
             }
         )
 

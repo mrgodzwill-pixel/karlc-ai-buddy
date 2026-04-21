@@ -40,6 +40,27 @@ def _split_name(full_name):
     return parts[0], " ".join(parts[1:]), " ".join(parts)
 
 
+def _fallback_contact_name(email=""):
+    local = str(email or "").strip().split("@")[0]
+    local = re.sub(r"[^a-zA-Z0-9]+", " ", local).strip()
+    return local.title()[:64].strip() or "Student"
+
+
+def _sanitize_name_fields(name="", email=""):
+    first_name, surname, full_name = _split_name(name)
+    full_name = str(full_name or "").strip()
+    if not full_name:
+        full_name = _fallback_contact_name(email)
+        first_name, surname, _ = _split_name(full_name)
+
+    full_name = full_name[:64].strip()
+    first_name = str(first_name or "").strip()[:64]
+    surname = str(surname or "").strip()[:64]
+    if not first_name:
+        first_name = _fallback_contact_name(email)[:64]
+    return first_name, surname, full_name
+
+
 def _coerce_id(value):
     if value in (None, ""):
         return ""
@@ -137,6 +158,13 @@ def _special_course_keys(course_query):
     return ""
 
 
+def _fallback_old_tag_name(course_query):
+    query = _normalize(course_query)
+    if "bundle" in query or "3-in-1" in query or "3 in 1" in query or "3in1" in query:
+        return "OLD_BUNDLE"
+    return "OLD_COURSE"
+
+
 def _configured_tag_name(course_key):
     env_map = {
         "mikrotik_basic": SYSTEME_TAG_MIKROTIK_BASIC,
@@ -221,7 +249,10 @@ def _resolve_tag_for_course(course_query):
     candidate_names = []
     if configured:
         candidate_names.append(configured)
-    candidate_names.append(course_query)
+    if course_key:
+        candidate_names.append(course_query)
+    else:
+        candidate_names.append(_fallback_old_tag_name(course_query))
     if course_key:
         course_name = str(COURSES.get(course_key, {}).get("name") or "").strip()
         if course_name:
@@ -237,7 +268,7 @@ def _resolve_tag_for_course(course_query):
         if tag:
             return tag, candidate
 
-    expected = configured or course_query
+    expected = configured or _fallback_old_tag_name(course_query)
     created = systeme_api.create_tag(expected)
     if created:
         return created, expected
@@ -292,7 +323,7 @@ def add_contact(email="", name="", phone_number="", ticket_id=None):
     if not email:
         raise ValueError("Email is required.")
 
-    first_name, surname, full_name = _split_name(name)
+    first_name, surname, full_name = _sanitize_name_fields(name, email=email)
     contact = systeme_api.create_contact(
         email,
         first_name=first_name,
@@ -341,7 +372,7 @@ def enroll_student(email="", course_query="", name="", phone_number="", ticket_i
     if not course_query:
         raise ValueError("Course is required.")
 
-    first_name, surname, full_name = _split_name(name)
+    first_name, surname, full_name = _sanitize_name_fields(name, email=email)
     contact = systeme_api.create_contact(
         email,
         first_name=first_name,
