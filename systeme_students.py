@@ -374,6 +374,111 @@ def upsert_systeme_student(payload, event_type="", event_timestamp="", message_i
         return dict(student)
 
 
+def upsert_systeme_student_snapshot(snapshot, source_event="api.backfill", event_timestamp="", message_id=""):
+    """Merge a normalized student snapshot into the local Systeme store."""
+    snapshot = dict(snapshot or {})
+    email = str(snapshot.get("email") or "").strip().lower()
+    if not email:
+        return None
+
+    event_type = str(source_event or snapshot.get("source_event") or "api.backfill").strip()
+    event_at = str(event_timestamp or snapshot.get("last_event_at") or _now_iso()).strip()
+    tags = [str(tag).strip() for tag in snapshot.get("tags", []) if str(tag).strip()]
+    fields = _field_map(snapshot.get("fields") or {})
+    courses = [dict(course) for course in snapshot.get("courses", []) if isinstance(course, dict)]
+    sales = [dict(sale) for sale in snapshot.get("sales", []) if isinstance(sale, dict)]
+
+    with file_lock(SYSTEME_STUDENTS_FILE):
+        store = load_student_store()
+        students = store.setdefault("students", [])
+        student = None
+        for item in students:
+            if str(item.get("email") or "").lower() == email:
+                student = item
+                break
+
+        if student is None:
+            student = {
+                "email": email,
+                "contact_id": "",
+                "name": "",
+                "first_name": "",
+                "surname": "",
+                "phone": "",
+                "tags": [],
+                "fields": {},
+                "courses": [],
+                "sales": [],
+                "events": [],
+                "last_event_at": "",
+            }
+            students.append(student)
+
+        student["contact_id"] = str(
+            _first_non_empty(snapshot.get("contact_id"), student.get("contact_id", ""))
+        )
+        student["name"] = _first_non_empty(snapshot.get("name"), student.get("name", ""))
+        student["first_name"] = _first_non_empty(snapshot.get("first_name"), student.get("first_name", ""))
+        student["surname"] = _first_non_empty(snapshot.get("surname"), student.get("surname", ""))
+        student["phone"] = _first_non_empty(snapshot.get("phone"), student.get("phone", ""))
+        student["fields"] = {**student.get("fields", {}), **fields}
+
+        combined_tags = list(student.get("tags", []))
+        for tag in tags:
+            if tag not in combined_tags:
+                combined_tags.append(tag)
+        student["tags"] = combined_tags
+
+        student["courses"] = _update_course_list(student.get("courses", []), courses)
+
+        if sales:
+            merged_sales = list(student.get("sales", []))
+            for sale_entry in sales:
+                sale_id = str(sale_entry.get("id") or "").strip()
+                if sale_id and any(str(item.get("id") or "") == sale_id for item in merged_sales):
+                    continue
+                merged_sales.append(sale_entry)
+            merged_sales.sort(
+                key=lambda item: _parse_timestamp(item.get("date")) or datetime.min.replace(tzinfo=PHT),
+                reverse=True,
+            )
+            student["sales"] = merged_sales[:50]
+
+        if event_type:
+            events = list(student.get("events", []))
+            signature = (event_type, event_at, str(message_id or ""))
+            if not any(
+                (
+                    item.get("type"),
+                    item.get("date"),
+                    str(item.get("message_id") or ""),
+                ) == signature
+                for item in events
+            ):
+                events.append(
+                    {
+                        "type": event_type,
+                        "date": event_at,
+                        "message_id": str(message_id or ""),
+                    }
+                )
+            events.sort(
+                key=lambda item: _parse_timestamp(item.get("date")) or datetime.min.replace(tzinfo=PHT),
+                reverse=True,
+            )
+            student["events"] = events[:50]
+
+        latest = _parse_timestamp(student.get("last_event_at")) or datetime.min.replace(tzinfo=PHT)
+        current = _parse_timestamp(event_at)
+        if current and current >= latest:
+            student["last_event_at"] = event_at
+
+        store["checked_at"] = _now_iso()
+        students.sort(key=lambda item: str(item.get("email") or ""))
+        _save_student_store(store)
+        return dict(student)
+
+
 def list_recent_enrolments(days_back=7):
     cutoff = datetime.now(PHT) - timedelta(days=days_back)
     enrolments = []

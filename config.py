@@ -43,6 +43,8 @@ SYSTEME_SENDER = os.environ.get("SYSTEME_SENDER", "course@karlcomboy.com").lower
 SUPPORT_EMAIL = os.environ.get("SUPPORT_EMAIL", "course@karlcomboy.com").lower()
 SYSTEME_WEBHOOK_SECRET = os.environ.get("SYSTEME_WEBHOOK_SECRET", "")
 SYSTEME_AUTOMATION_TOKEN = os.environ.get("SYSTEME_AUTOMATION_TOKEN", "")
+SYSTEME_API_KEY = os.environ.get("SYSTEME_API_KEY", "")
+SYSTEME_API_BASE_URL = os.environ.get("SYSTEME_API_BASE_URL", "https://api.systeme.io/api")
 
 # === Gmail IMAP Config (for enrollment checker & Xendit lookups) ===
 # See gmail_imap.py. Enable by setting GMAIL_USER and GMAIL_APP_PASSWORD

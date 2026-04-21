@@ -82,6 +82,11 @@ Optional for SMS follow-ups:
 - `SEMAPHORE_SENDER_NAME` (optional)
 - `SUPPORT_EMAIL` (optional; defaults to `course@karlcomboy.com`)
 
+Optional for direct Systeme.io API backfill:
+
+- `SYSTEME_API_KEY` for historical contacts/enrollment import
+- `SYSTEME_API_BASE_URL` if you need to override the default API host
+
 Optional for direct Xendit integration:
 
 - `XENDIT_SECRET_KEY` for API sync and customer enrichment
@@ -109,6 +114,7 @@ The app verifies `x-callback-token` against your configured webhook token and st
 | `/follow 12 \| Juan Dela Cruz \| 09171234567` | Send SMS follow-up for ticket #12 |
 | `/support` | Show recent emails sent to the support inbox |
 | `/enrollment` | Run enrollment check (prefers Xendit API, falls back to Gmail IMAP) |
+| `/systeme_sync` | Import older enrolled students from Systeme.io Public API |
 | `/approve_all` | Approve all suggested replies |
 | `/status` | Check agent status |
 | Or just chat naturally! | AI-powered conversation |

@@ -295,6 +295,7 @@ def send_help():
     msg += "📊 /enrollment - Run enrollment comparison now\n"
     msg += "📚 /students - View enrolled students grouped by course\n"
     msg += "📚 /students hybrid - Filter enrolled students by course keyword\n"
+    msg += "📥 /systeme\\_sync - Import old enrolled students from Systeme API\n"
     msg += "🗣️ /chat - Talk to AI Buddy (or just type normally!)\n"
     msg += "❓ /help - Show this help\n"
     msg += "\n━━━━━━━━━━━━━━━━━━\n"
@@ -411,6 +412,32 @@ def send_systeme_students(course_query=""):
     from systeme_students import format_course_enrollment_summary
 
     send_message(format_course_enrollment_summary(course_query=course_query))
+
+
+def send_systeme_backfill():
+    """Run a one-time Systeme Public API backfill for older enrolled students."""
+    from systeme_backfill import run_systeme_backfill
+
+    result = run_systeme_backfill()
+    if not result.get("ok"):
+        send_message(
+            "❌ Systeme API backfill failed.\n"
+            f"{result.get('message', 'Unknown error.')}\n\n"
+            "Add `SYSTEME_API_KEY` in Railway, redeploy, then try `/systeme_sync` again."
+        )
+        return
+
+    msg = "📥 *Systeme API Backfill Complete*\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    msg += f"👥 Contacts scanned: {result.get('contacts_scanned', 0)}\n"
+    msg += f"📚 Courses scanned: {result.get('courses_scanned', 0)}\n"
+    msg += f"🎓 Enrollments scanned: {result.get('enrollments_scanned', 0)}\n"
+    msg += f"🔗 Enrollments linked: {result.get('enrollments_linked', 0)}\n"
+    msg += f"✅ Students imported/updated: {result.get('students_imported', 0)}\n"
+    if result.get("skipped_without_email", 0):
+        msg += f"⚠️ Skipped without email: {result.get('skipped_without_email', 0)}\n"
+    msg += "\nTry `/students` or ask me about a student/course right away."
+    send_message(msg)
 
 
 def resolve_tickets(ticket_ids):
@@ -694,6 +721,11 @@ def process_message(text):
         send_message("⏳ Checking stored Systeme students... sandali lang Boss!")
         send_systeme_students(course_query=course_query)
         return "students"
+
+    if text_lower in ["/systeme_sync", "/systemesync", "/backfill_systeme"]:
+        send_message("⏳ Running Systeme API backfill... this may take a bit, sandali lang Boss!")
+        send_systeme_backfill()
+        return "systeme_sync"
 
     # /enrollment command OR natural-language ask ("check enrollments",
     # "enrollment status", "paid but not enrolled", etc.) — both run the check

@@ -77,6 +77,16 @@ class TelegramBotCommandTests(unittest.TestCase):
         self.assertTrue(send_message.called)
         self.assertEqual(result, "students")
 
+    def test_process_message_systeme_sync_runs_backfill(self):
+        with patch("telegram_bot.send_systeme_backfill") as send_backfill, patch(
+            "telegram_bot.send_message"
+        ) as send_message:
+            result = telegram_bot.process_message("/systeme_sync")
+
+        send_backfill.assert_called_once_with()
+        self.assertTrue(send_message.called)
+        self.assertEqual(result, "systeme_sync")
+
 
 if __name__ == "__main__":
     unittest.main()
