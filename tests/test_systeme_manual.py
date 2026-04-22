@@ -150,6 +150,36 @@ class SystemeManualTests(unittest.TestCase):
         assign_tag.assert_called_once_with("501", "99")
         self.assertEqual(result["tag"]["name"], "QUICKSTART_PAID")
 
+    def test_enroll_student_uses_exact_configured_tag_not_partial_xendit_tag(self):
+        contact = {"id": 501, "email": "juan@example.com"}
+        configured_tag = {"id": 77, "name": "QUICKSTART_PAID"}
+        ticket = {
+            "id": 170,
+            "student_name": "Juan Dela Cruz",
+            "student_email": "juan@example.com",
+            "phone_number": "09171234567",
+            "course_title": "Invoice Paid: karlc-mikrotik-basic-799-1776000272022",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = os.path.join(tmpdir, "systeme_students.json")
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file), patch(
+                "systeme_manual.systeme_api.available", return_value=True
+            ), patch(
+                "systeme_manual.get_ticket", return_value=ticket
+            ), patch(
+                "systeme_manual.systeme_api.create_contact", return_value=contact
+            ), patch(
+                "systeme_manual.systeme_api.find_tag_by_name", return_value=configured_tag
+            ) as find_tag_by_name, patch(
+                "systeme_manual.systeme_api.assign_tag_to_contact", return_value={}
+            ) as assign_tag:
+                result = systeme_manual.enroll_student(ticket_id=170, resolve_ticket_on_success=False)
+
+        find_tag_by_name.assert_called_once_with("QUICKSTART_PAID", exact_only=True)
+        assign_tag.assert_called_once_with("501", "77")
+        self.assertEqual(result["tag"]["name"], "QUICKSTART_PAID")
+
     def test_sanitize_name_fields_truncates_long_names(self):
         first_name, surname, full_name = systeme_manual._sanitize_name_fields(
             "A" * 120,

@@ -203,6 +203,12 @@ class SystemeAPITests(unittest.TestCase):
 
         self.assertIsNone(contacts)
 
+    def test_find_tag_by_name_exact_only_ignores_partial_match(self):
+        with patch.object(systeme_api, "list_tags", return_value=[{"id": 1, "name": "XENDIT_QUICKSTART_PAID"}]):
+            tag = systeme_api.find_tag_by_name("QUICKSTART_PAID", exact_only=True)
+
+        self.assertIsNone(tag)
+
 
 if __name__ == "__main__":
     unittest.main()

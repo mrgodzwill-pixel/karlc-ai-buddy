@@ -21,6 +21,7 @@ from config import (
 )
 from systeme_students import upsert_systeme_student_snapshot
 from ticket_system import get_ticket, resolve_ticket
+from xendit_payments import extract_course_from_subject
 
 
 def _now_iso():
@@ -271,29 +272,11 @@ def _resolve_tag_for_course(course_query):
 
     course_key = _course_key_from_query(course_query) or _special_course_keys(course_query)
     configured = _configured_tag_name(course_key) if course_key else ""
-    candidate_names = []
-    if configured:
-        candidate_names.append(configured)
-    if course_key:
-        candidate_names.append(course_query)
-    else:
-        candidate_names.append(_fallback_old_tag_name(course_query))
-    if course_key:
-        course_name = str(COURSES.get(course_key, {}).get("name") or "").strip()
-        if course_name:
-            candidate_names.append(course_name)
-
-    seen = set()
-    for candidate in candidate_names:
-        normalized = _normalize(candidate)
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        tag = systeme_api.find_tag_by_name(candidate)
-        if tag:
-            return tag, candidate
-
     expected = configured or _fallback_old_tag_name(course_query)
+    tag = systeme_api.find_tag_by_name(expected, exact_only=True)
+    if tag:
+        return tag, expected
+
     created = systeme_api.create_tag(expected)
     if created:
         return created, expected
@@ -307,12 +290,15 @@ def _ticket_payload(ticket_id):
     ticket = get_ticket(ticket_id)
     if not ticket:
         raise ValueError(f"Ticket #{ticket_id} not found.")
+    raw_course = str(ticket.get("course_title") or "").strip()
+    normalized_course = str(extract_course_from_subject(raw_course) or "").strip() or raw_course
     return {
         "ticket": ticket,
         "email": str(ticket.get("student_email") or "").strip().lower(),
         "name": str(ticket.get("student_name") or "").strip(),
         "phone_number": str(ticket.get("phone_number") or "").strip(),
-        "course_query": str(ticket.get("course_title") or "").strip(),
+        "course_query": normalized_course,
+        "raw_course_query": raw_course,
     }
 
 

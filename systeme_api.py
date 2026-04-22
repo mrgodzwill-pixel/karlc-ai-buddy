@@ -421,7 +421,7 @@ def create_enrollment(contact_id, course_id, timeout=20):
     return None
 
 
-def find_tag_by_name(tag_name, timeout=20):
+def find_tag_by_name(tag_name, timeout=20, exact_only=False):
     normalized = str(tag_name or "").strip().lower()
     if not normalized:
         return None
@@ -439,7 +439,7 @@ def find_tag_by_name(tag_name, timeout=20):
         if lowered == normalized:
             exact = tag
             break
-        if normalized in lowered or lowered in normalized:
+        if not exact_only and (normalized in lowered or lowered in normalized):
             partial.append(tag)
 
     return exact or (partial[0] if partial else None)
@@ -450,7 +450,7 @@ def create_tag(name, timeout=20):
     if not name:
         raise ValueError("Tag name is required")
 
-    existing = find_tag_by_name(name, timeout=timeout)
+    existing = find_tag_by_name(name, timeout=timeout, exact_only=True)
     if existing:
         return existing
 
