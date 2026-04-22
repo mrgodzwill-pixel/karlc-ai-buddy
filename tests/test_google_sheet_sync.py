@@ -50,7 +50,7 @@ class GoogleSheetSyncTests(unittest.TestCase):
             row[1],
             "MikroTik QuickStart: Configure From Scratch, Hybrid Access Combo: IPoE + PPPoE",
         )
-        self.assertEqual(row[2], "QUICKSTART_PAID")
+        self.assertEqual(row[2], "QUICKSTART_PAID, HYBRID_PAID")
 
     def test_student_row_values_splits_legacy_combined_entries(self):
         google_sheet_sync = importlib.import_module("google_sheet_sync")
@@ -109,15 +109,15 @@ class GoogleSheetSyncTests(unittest.TestCase):
                     "email": "existing@example.com",
                     "name": "Existing Updated",
                     "phone": "639111111111",
-                    "courses": [{"name": "Course A"}],
-                    "tags": ["TAG_A"],
+                    "courses": [{"name": "MikroTik QuickStart: Configure From Scratch"}],
+                    "tags": ["QUICKSTART_PAID"],
                 },
                 {
                     "email": "new@example.com",
                     "name": "New Student",
                     "phone": "639222222222",
-                    "courses": [{"name": "Course B"}],
-                    "tags": ["TAG_B"],
+                    "courses": [{"name": "Hybrid Access Combo: IPoE + PPPoE"}],
+                    "tags": ["HYBRID_PAID"],
                 },
             ]
         }
@@ -202,8 +202,8 @@ class GoogleSheetSyncTests(unittest.TestCase):
                     "email": "dup@example.com",
                     "name": "Dup Student",
                     "phone": "639111111111",
-                    "courses": [{"name": "Course A"}],
-                    "tags": ["TAG_A"],
+                    "courses": [{"name": "MikroTik QuickStart: Configure From Scratch"}],
+                    "tags": ["QUICKSTART_PAID"],
                 }
             ]
         }
@@ -241,8 +241,8 @@ class GoogleSheetSyncTests(unittest.TestCase):
             "email": "dup@example.com",
             "name": "Dup Student",
             "phone": "639111111111",
-            "courses": [{"name": "Course A"}],
-            "tags": ["TAG_A"],
+            "courses": [{"name": "MikroTik QuickStart: Configure From Scratch"}],
+            "tags": ["QUICKSTART_PAID"],
         }
 
         with patch.object(google_sheet_sync, "available", return_value=True), \
@@ -267,6 +267,35 @@ class GoogleSheetSyncTests(unittest.TestCase):
         mock_delete_rows.assert_called_once_with([3])
         mock_update_values.assert_called_once()
         mock_append.assert_not_called()
+
+    def test_student_row_values_normalizes_invoice_style_course_titles_to_official_names_and_tags(self):
+        google_sheet_sync = importlib.import_module("google_sheet_sync")
+
+        row = google_sheet_sync._student_row_values(
+            {
+                "email": "romel@example.com",
+                "courses": [
+                    {
+                        "name": "10G Core Part 3: Centralized Pisowifi Setup",
+                        "status": "enrolled",
+                    },
+                    {
+                        "name": "Build a true centralized Pisowifi system with auto select, random MAC fix, and synchronized multi-vendo deployment. - Invoice for Romel marimla",
+                        "status": "enrolled",
+                    },
+                    {
+                        "name": "Get ALL 4 MikroTik courses in one bundle! From basic setup to advanced ISP operations — lahat kasama na. Save ₱1, 050 vs buying separately. - Invoice for Maro Urbano",
+                        "status": "enrolled",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(
+            row[1],
+            "10G Core Part 3: Centralized Pisowifi Setup, Complete MikroTik Mastery Bundle",
+        )
+        self.assertEqual(row[2], "PISOWIFI_PAID, BUNDLE4_PAID")
 
     def test_sync_student_record_skips_sheet_write_for_non_enrolled_student(self):
         google_sheet_sync = importlib.import_module("google_sheet_sync")

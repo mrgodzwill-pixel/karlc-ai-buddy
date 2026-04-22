@@ -6,6 +6,7 @@ import re
 from datetime import datetime, timezone
 
 import systeme_api
+from course_mapping import canonical_course_name, official_tag_name_for_course
 from config import (
     COURSES,
     SYSTEME_TAG_MIKROTIK_BASIC,
@@ -21,7 +22,6 @@ from config import (
 )
 from systeme_students import upsert_systeme_student_snapshot
 from ticket_system import get_ticket, resolve_ticket
-from xendit_payments import extract_course_from_subject
 
 
 def _now_iso():
@@ -270,9 +270,7 @@ def _resolve_tag_for_course(course_query):
     if not course_query:
         raise ValueError("Course is required.")
 
-    course_key = _course_key_from_query(course_query) or _special_course_keys(course_query)
-    configured = _configured_tag_name(course_key) if course_key else ""
-    expected = configured or _fallback_old_tag_name(course_query)
+    expected = official_tag_name_for_course(course_query)
     tag = systeme_api.find_tag_by_name(expected, exact_only=True)
     if tag:
         return tag, expected
@@ -291,7 +289,7 @@ def _ticket_payload(ticket_id):
     if not ticket:
         raise ValueError(f"Ticket #{ticket_id} not found.")
     raw_course = str(ticket.get("course_title") or "").strip()
-    normalized_course = str(extract_course_from_subject(raw_course) or "").strip() or raw_course
+    normalized_course = canonical_course_name(raw_course)
     return {
         "ticket": ticket,
         "email": str(ticket.get("student_email") or "").strip().lower(),
@@ -404,7 +402,7 @@ def enroll_student(email="", course_query="", name="", phone_number="", ticket_i
     course_entry = {
         "id": "",
         "name": str(course_query).strip(),
-        "kind": "course",
+        "kind": "course_bundle" if "bundle" in str(course_query).lower() else "course",
         "status": "sold",
         "date": _now_iso(),
         "source_event": "manual.tag_assigned",

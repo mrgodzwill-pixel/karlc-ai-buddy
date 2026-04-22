@@ -52,7 +52,7 @@ class SystemeManualTests(unittest.TestCase):
             "course_title": "MikroTik Hybrid",
         }
         contact = {"id": 501, "email": "juan@example.com"}
-        tag = {"id": 33, "name": "MikroTik Hybrid"}
+        tag = {"id": 33, "name": "HYBRID_PAID"}
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store_file = os.path.join(tmpdir, "systeme_students.json")
@@ -73,8 +73,11 @@ class SystemeManualTests(unittest.TestCase):
                 store = systeme_students.load_student_store()
 
         resolve_ticket.assert_called_once_with(15)
-        self.assertEqual(result["tag"]["name"], "MikroTik Hybrid")
-        self.assertEqual(store["students"][0]["courses"][0]["name"], "MikroTik Hybrid")
+        self.assertEqual(result["tag"]["name"], "HYBRID_PAID")
+        self.assertEqual(
+            store["students"][0]["courses"][0]["name"],
+            "Hybrid Access Combo: IPoE + PPPoE",
+        )
         self.assertEqual(store["students"][0]["courses"][0]["status"], "sold")
 
     def test_enroll_student_uses_special_bundle_tag_mapping(self):

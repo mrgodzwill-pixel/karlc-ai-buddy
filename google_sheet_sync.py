@@ -21,6 +21,7 @@ from config import (
     SYSTEME_SHEET_EXCLUDED_TAGS,
     get_google_service_account_info,
 )
+from course_mapping import canonicalize_course_names, official_tag_names_for_courses
 from storage import file_lock
 from systeme_students import load_student_store
 
@@ -137,13 +138,14 @@ def _normalize_list(values: Iterable[str], *, excluded_values=None):
 
 
 def _student_row_values(student: dict):
-    courses = [
+    raw_courses = [
         course.get("name", "")
         for course in student.get("courses", [])
         if course.get("name")
         and str(course.get("status") or "enrolled").lower() == "enrolled"
     ]
-    tags = student.get("tags", [])
+    courses = canonicalize_course_names(raw_courses, allow_old_fallback=False)
+    tags = official_tag_names_for_courses(courses, allow_old_fallback=False)
     return [
         str(student.get("email") or "").strip().lower(),
         _normalize_list(courses),
