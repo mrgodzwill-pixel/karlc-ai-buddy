@@ -506,6 +506,11 @@ def format_comparison_telegram(report):
     msg += f"✅ Systeme.io Enrollments: {report['total_enrolments']}\n"
     msg += f"🟢 Matched: {report['matched']}\n"
     msg += f"🔴 Unmatched: {report['unmatched']}\n\n"
+    if report.get("collapsed_unmatched_duplicates"):
+        msg += (
+            f"ℹ️ Repeated payment rows collapsed into ticket cases: "
+            f"{report['collapsed_unmatched_duplicates']}\n\n"
+        )
     if report.get("suppressed"):
         msg += f"🟡 Manually Resolved / Suppressed: {report['suppressed']}\n\n"
 

@@ -39,6 +39,14 @@ def _normalise_enrollment_key(student_email="", course_title="", price="", date_
     )
 
 
+def _normalise_pending_ticket_key(ticket_type="", student_email="", course_title=""):
+    return (
+        str(ticket_type or "").strip().lower(),
+        str(student_email or "").strip().lower(),
+        str(course_title or "").strip().lower(),
+    )
+
+
 def _ticket_to_enrollment_key(ticket):
     return _normalise_enrollment_key(
         ticket.get("student_email", ""),
@@ -54,6 +62,22 @@ def _student_to_enrollment_key(student):
         student.get("course", student.get("course_title", "")),
         student.get("amount", student.get("price", "")),
         student.get("date_paid", student.get("date", "")),
+    )
+
+
+def _student_to_pending_ticket_key(student, ticket_type="enrollment_incomplete"):
+    return _normalise_pending_ticket_key(
+        ticket_type,
+        student.get("email", student.get("student_email", "")),
+        student.get("course", student.get("course_title", "")),
+    )
+
+
+def _ticket_to_pending_key(ticket):
+    return _normalise_pending_ticket_key(
+        ticket.get("type", ""),
+        ticket.get("student_email", ""),
+        ticket.get("course_title", ""),
     )
 
 
@@ -128,6 +152,39 @@ def _merge_ticket_details(ticket, student_name="", student_email="", course_titl
     return changed
 
 
+def dedupe_enrollment_ticket_candidates(students):
+    """Collapse repeated enrollment rows into the same manual-enrollment case.
+
+    The enrollment report can contain repeated unmatched payment rows for the
+    same student/course, while tickets intentionally dedupe to one pending case.
+    This helper keeps the first row order stable and merges in any missing
+    details from later duplicates so report counts line up with ticket counts.
+    """
+    deduped = []
+    indexes = {}
+
+    def _pick(existing, incoming, *fields):
+        for field in fields:
+            incoming_value = str(incoming.get(field) or "").strip()
+            if incoming_value and _is_missing_value(existing.get(field)):
+                existing[field] = incoming_value
+
+    for student in students or []:
+        student_copy = dict(student)
+        key = _student_to_pending_ticket_key(student_copy)
+        if key in indexes:
+            existing = deduped[indexes[key]]
+            _pick(existing, student_copy, "payer_name", "name", "email", "course", "course_raw")
+            _pick(existing, student_copy, "amount", "price", "payment_method", "phone")
+            _pick(existing, student_copy, "date_paid", "date")
+            continue
+
+        indexes[key] = len(deduped)
+        deduped.append(student_copy)
+
+    return deduped
+
+
 def add_enrollment_resolution(ticket):
     """Suppress future unmatched alerts for this exact enrollment record."""
     if not ticket or ticket.get("type") != "enrollment_incomplete":
@@ -200,12 +257,12 @@ def create_ticket(ticket_type, student_name, student_email, course_title="", pri
     """Create a new ticket, skipping if a matching pending ticket already exists."""
     with file_lock(TICKETS_FILE):
         tickets = _load_tickets()
+        pending_key = _normalise_pending_ticket_key(ticket_type, student_email, course_title)
 
         for t in tickets:
-            if (t["student_email"] == student_email and
-                t["type"] == ticket_type and
-                t["course_title"] == course_title and
-                t["status"] == "pending"):
+            if t.get("status") != "pending":
+                continue
+            if _ticket_to_pending_key(t) == pending_key:
                 if _merge_ticket_details(
                     t,
                     student_name=student_name,
@@ -379,12 +436,9 @@ def get_ticket(ticket_id):
 def find_matching_ticket(ticket_type, student_email, course_title="", status=None):
     """Find a ticket by the same matching fields used for duplicate detection."""
     tickets = _load_tickets()
+    pending_key = _normalise_pending_ticket_key(ticket_type, student_email, course_title)
     for ticket in tickets:
-        if ticket.get("type") != ticket_type:
-            continue
-        if ticket.get("student_email") != student_email:
-            continue
-        if ticket.get("course_title") != course_title:
+        if _ticket_to_pending_key(ticket) != pending_key:
             continue
         if status and ticket.get("status") != status:
             continue

@@ -50,6 +50,51 @@ class HourlyMonitoringTests(unittest.TestCase):
         self.assertIn("Active unmatched students still pending", send_message.call_args[0][0])
         self.assertIn("09171234567", send_message.call_args[0][0])
 
+    def test_run_enrollment_check_collapses_duplicate_unmatched_rows_into_one_ticket_case(self):
+        duplicate_rows = [
+            {
+                "payer_name": "Ricky Andeo",
+                "email": "rickyandeo90@gmail.com",
+                "phone": "639777235690",
+                "course": "10G Core Part 3: Centralized Pisowifi Setup",
+                "amount": "PHP 1,500",
+                "payment_method": "xendit",
+                "date_paid": "2026-04-21T16:30:00+08:00",
+            },
+            {
+                "payer_name": "Ricky Andeo",
+                "email": " RickyAndeo90@gmail.com ",
+                "phone": "",
+                "course": " 10G Core Part 3: Centralized Pisowifi Setup ",
+                "amount": "PHP 1,500",
+                "payment_method": "",
+                "date_paid": "",
+            },
+        ]
+        base_report = {
+            "total_payments": 2,
+            "total_enrolments": 0,
+            "matched": 0,
+            "unmatched": 2,
+            "matched_students": [],
+            "unmatched_students": list(duplicate_rows),
+            "payments": [],
+            "enrolments": [],
+            "checked_at": "2026-04-21T16:30:00+08:00",
+        }
+
+        with patch("fb_agent.compare_payments_vs_enrolments", return_value=dict(base_report)), patch(
+            "fb_agent.filter_resolved_enrollment_students",
+            return_value=(list(duplicate_rows), []),
+        ), patch("fb_agent.create_enrollment_ticket", return_value={"id": 1}) as create_ticket:
+            report = fb_agent.run_enrollment_check(notify_if_new_tickets=False)
+
+        self.assertEqual(report["unmatched"], 1)
+        self.assertEqual(report["collapsed_unmatched_duplicates"], 1)
+        self.assertEqual(len(report["unmatched_students"]), 1)
+        self.assertEqual(create_ticket.call_count, 1)
+        self.assertEqual(report["unmatched_students"][0]["phone"], "639777235690")
+
     def test_run_hourly_support_watch_sends_reminder_for_pending_support_tickets(self):
         pending_ticket = {
             "id": 7,

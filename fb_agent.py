@@ -22,6 +22,7 @@ from ticket_system import (
     get_ticket_stats,
     format_pending_tickets_report,
     create_enrollment_ticket,
+    dedupe_enrollment_ticket_candidates,
     filter_resolved_enrollment_students,
 )
 from enrollment_checker import compare_payments_vs_enrolments, format_comparison_telegram
@@ -345,11 +346,15 @@ def run_enrollment_check(notify_if_new_tickets=False):
     
     try:
         report = compare_payments_vs_enrolments(days_back=7)
-        active_unmatched, suppressed_unmatched = filter_resolved_enrollment_students(
+        active_unmatched_raw, suppressed_unmatched_raw = filter_resolved_enrollment_students(
             report.get("unmatched_students", [])
         )
+        active_unmatched = dedupe_enrollment_ticket_candidates(active_unmatched_raw)
+        suppressed_unmatched = dedupe_enrollment_ticket_candidates(suppressed_unmatched_raw)
+        collapsed_duplicates = len(active_unmatched_raw) - len(active_unmatched)
         report["suppressed_unmatched_students"] = suppressed_unmatched
         report["suppressed"] = len(suppressed_unmatched)
+        report["collapsed_unmatched_duplicates"] = max(collapsed_duplicates, 0)
         report["unmatched_students"] = active_unmatched
         report["unmatched"] = len(active_unmatched)
         
@@ -369,6 +374,12 @@ def run_enrollment_check(notify_if_new_tickets=False):
         
         print(f"[Enrollment] Payments: {report['total_payments']}, Enrollments: {report['total_enrolments']}")
         print(f"[Enrollment] Matched: {report['matched']}, Unmatched: {report['unmatched']}")
+        if report.get("collapsed_unmatched_duplicates"):
+            print(
+                "[Enrollment] Collapsed "
+                f"{report['collapsed_unmatched_duplicates']} repeated unmatched payment row(s) "
+                "into existing ticket case(s)"
+            )
         if report.get("suppressed"):
             print(f"[Enrollment] Suppressed (manually resolved): {report['suppressed']}")
         if new_tickets:

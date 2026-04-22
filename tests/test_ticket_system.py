@@ -177,6 +177,34 @@ class TicketSystemResolutionTests(unittest.TestCase):
                 self.assertEqual(active, [])
                 self.assertEqual(len(suppressed), 1)
 
+    def test_create_enrollment_ticket_normalises_email_and_course_for_duplicate_detection(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tickets_file = f"{tmpdir}/tickets.json"
+            overrides_file = f"{tmpdir}/resolved_enrollment_overrides.json"
+
+            with patch.object(ticket_system, "TICKETS_FILE", tickets_file), patch.object(
+                ticket_system, "ENROLLMENT_RESOLUTIONS_FILE", overrides_file
+            ):
+                first = ticket_system.create_enrollment_ticket(
+                    student_name="Ricky Andeo",
+                    student_email="rickyandeo90@gmail.com",
+                    course_title="10G Core Part 3: Centralized Pisowifi Setup",
+                    price="PHP 1500",
+                    phone_number="639777235690",
+                )
+                duplicate = ticket_system.create_enrollment_ticket(
+                    student_name="Ricky",
+                    student_email=" RickyAndeo90@gmail.com ",
+                    course_title=" 10G Core Part 3: Centralized Pisowifi Setup ",
+                    price="PHP 1500",
+                )
+                pending = ticket_system.get_pending_tickets("enrollment_incomplete")
+
+                self.assertIsNotNone(first)
+                self.assertIsNone(duplicate)
+                self.assertEqual(len(pending), 1)
+                self.assertEqual(pending[0]["phone_number"], "639777235690")
+
 
 if __name__ == "__main__":
     unittest.main()
