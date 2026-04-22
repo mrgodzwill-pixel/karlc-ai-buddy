@@ -183,6 +183,93 @@ class SystemeManualTests(unittest.TestCase):
         assign_tag.assert_called_once_with("501", "77")
         self.assertEqual(result["tag"]["name"], "QUICKSTART_PAID")
 
+    def test_enroll_student_recovers_missing_ticket_email_from_xendit_store(self):
+        contact = {"id": 501, "email": "rickyandeo90@gmail.com"}
+        configured_tag = {"id": 66, "name": "PISOWIFI_PAID"}
+        ticket = {
+            "id": 182,
+            "type": "enrollment_incomplete",
+            "student_name": "Ricky Andeo",
+            "student_email": "",
+            "phone_number": "",
+            "course_title": "10G Core Part 3: Centralized Pisowifi Setup",
+            "price": "PHP 1,500",
+            "payment_method": "xendit",
+            "date_paid": "2026-04-21T23:53:00+08:00",
+        }
+        payment_store = {
+            "payments": [
+                {
+                    "email": "rickyandeo90@gmail.com",
+                    "payer_name": "Ricky Andeo",
+                    "phone": "639777235690",
+                    "course": "10G Core Part 3: Centralized Pisowifi Setup",
+                    "amount": "PHP 1,500",
+                    "status": "paid",
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = os.path.join(tmpdir, "systeme_students.json")
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file), patch(
+                "systeme_manual.systeme_api.available", return_value=True
+            ), patch(
+                "systeme_manual.get_ticket", side_effect=[ticket, dict(ticket, student_email="rickyandeo90@gmail.com")]
+            ), patch(
+                "systeme_manual.load_payment_store", return_value=payment_store
+            ), patch(
+                "systeme_manual.update_ticket_contact_details"
+            ) as update_ticket, patch(
+                "systeme_manual.systeme_api.create_contact", return_value=contact
+            ), patch(
+                "systeme_manual.systeme_api.find_tag_by_name", return_value=configured_tag
+            ), patch(
+                "systeme_manual.systeme_api.assign_tag_to_contact", return_value={}
+            ):
+                result = systeme_manual.enroll_student(ticket_id=182, resolve_ticket_on_success=False)
+
+        update_ticket.assert_called_once()
+        self.assertEqual(result["email"], "rickyandeo90@gmail.com")
+        self.assertEqual(result["phone_number"], "639777235690")
+        self.assertEqual(result["tag"]["name"], "PISOWIFI_PAID")
+
+    def test_enroll_student_ticket_without_recoverable_email_raises_clear_error(self):
+        ticket = {
+            "id": 182,
+            "type": "enrollment_incomplete",
+            "student_name": "Ricky Andeo",
+            "student_email": "",
+            "phone_number": "",
+            "course_title": "10G Core Part 3: Centralized Pisowifi Setup",
+            "price": "PHP 1,500",
+        }
+
+        with patch(
+            "systeme_manual.systeme_api.available", return_value=True
+        ), patch(
+            "systeme_manual.get_ticket", return_value=ticket
+        ), patch(
+            "systeme_manual.load_payment_store", return_value={"payments": []}
+        ):
+            with self.assertRaisesRegex(ValueError, "couldn't recover one from Xendit"):
+                systeme_manual.enroll_student(ticket_id=182, resolve_ticket_on_success=False)
+
+    def test_enroll_student_rejects_non_enrollment_ticket_ids(self):
+        ticket = {
+            "id": 25,
+            "type": "support_email",
+            "student_name": "Juan Dela Cruz",
+            "student_email": "juan@example.com",
+            "course_title": "Help me enroll",
+        }
+
+        with patch("systeme_manual.systeme_api.available", return_value=True), patch(
+            "systeme_manual.get_ticket", return_value=ticket
+        ):
+            with self.assertRaisesRegex(ValueError, "not an enrollment ticket"):
+                systeme_manual.enroll_student(ticket_id=25, resolve_ticket_on_success=False)
+
     def test_sanitize_name_fields_truncates_long_names(self):
         first_name, surname, full_name = systeme_manual._sanitize_name_fields(
             "A" * 120,

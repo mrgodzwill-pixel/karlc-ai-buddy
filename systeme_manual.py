@@ -21,7 +21,8 @@ from config import (
     SYSTEME_TAG_BUNDLE4,
 )
 from systeme_students import upsert_systeme_student_snapshot
-from ticket_system import get_ticket, resolve_ticket
+from ticket_system import get_ticket, resolve_ticket, update_ticket_contact_details
+from xendit_payments import load_payment_store
 
 
 def _now_iso():
@@ -30,6 +31,14 @@ def _now_iso():
 
 def _normalize(text):
     return re.sub(r"\s+", " ", str(text or "").strip().lower())
+
+
+def _amount_digits(value):
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def _phone_digits(value):
+    return re.sub(r"\D", "", str(value or ""))
 
 
 def _split_name(full_name):
@@ -288,16 +297,126 @@ def _ticket_payload(ticket_id):
     ticket = get_ticket(ticket_id)
     if not ticket:
         raise ValueError(f"Ticket #{ticket_id} not found.")
+    ticket_type = str(ticket.get("type") or "").strip()
+    if ticket_type and ticket_type != "enrollment_incomplete":
+        raise ValueError(
+            f"Ticket #{ticket_id} is `{ticket_type}`, not an enrollment ticket. "
+            "Use `/systeme_enroll` only for Paid but Not Enrolled tickets."
+        )
     raw_course = str(ticket.get("course_title") or "").strip()
-    normalized_course = canonical_course_name(raw_course)
+    normalized_course = canonical_course_name(raw_course) or raw_course
+    email = str(ticket.get("student_email") or "").strip().lower()
+    name = str(ticket.get("student_name") or "").strip()
+    phone_number = str(ticket.get("phone_number") or "").strip()
+
+    recovered = _recover_ticket_payment_details(ticket, normalized_course)
+    if recovered:
+        email = email or str(recovered.get("email") or "").strip().lower()
+        name = name or str(recovered.get("payer_name") or "").strip()
+        phone_number = phone_number or str(recovered.get("phone") or recovered.get("phone_normalized") or "").strip()
+        normalized_course = normalized_course or canonical_course_name(
+            recovered.get("course") or recovered.get("description") or recovered.get("subject", "")
+        )
+        update_ticket_contact_details(
+            ticket_id,
+            student_name=name,
+            student_email=email,
+            course_title=normalized_course or raw_course,
+            price=ticket.get("price") or recovered.get("amount", ""),
+            payment_method=ticket.get("payment_method") or recovered.get("payment_method", ""),
+            date_paid=ticket.get("date_paid") or recovered.get("paid_at") or recovered.get("date", ""),
+            phone_number=phone_number,
+        )
+        ticket = get_ticket(ticket_id) or ticket
+
+    if not email:
+        raise ValueError(
+            f"Ticket #{ticket_id} has no saved email and I couldn't recover one from Xendit yet."
+        )
+    if not normalized_course:
+        raise ValueError(
+            f"Ticket #{ticket_id} has no recognizable course title yet."
+        )
+
     return {
         "ticket": ticket,
-        "email": str(ticket.get("student_email") or "").strip().lower(),
-        "name": str(ticket.get("student_name") or "").strip(),
-        "phone_number": str(ticket.get("phone_number") or "").strip(),
+        "email": email,
+        "name": name,
+        "phone_number": phone_number,
         "course_query": normalized_course,
         "raw_course_query": raw_course,
     }
+
+
+def _recover_ticket_payment_details(ticket, course_query=""):
+    """Best-effort recovery of missing enrollment ticket details from Xendit data."""
+    current_email = str(ticket.get("student_email") or "").strip().lower()
+    current_name = str(ticket.get("student_name") or "").strip()
+    current_phone = str(ticket.get("phone_number") or "").strip()
+    current_amount = str(ticket.get("price") or "").strip()
+    course_query = str(course_query or ticket.get("course_title") or "").strip()
+    canonical_course = canonical_course_name(course_query, allow_old_fallback=True) or course_query
+    canonical_course_norm = _normalize(canonical_course)
+    name_norm = _normalize(current_name)
+    amount_digits = _amount_digits(current_amount)
+    phone_digits = _phone_digits(current_phone)
+
+    best = None
+    best_score = 0
+
+    for payment in load_payment_store().get("payments", []):
+        payment_email = str(payment.get("email") or "").strip().lower()
+        if not payment_email:
+            continue
+
+        score = 0
+        payment_course = canonical_course_name(
+            payment.get("course") or payment.get("description") or payment.get("subject", ""),
+            allow_old_fallback=True,
+        ) or str(payment.get("course") or "").strip()
+        payment_course_norm = _normalize(payment_course)
+
+        if current_email and payment_email == current_email:
+            score += 500
+        if canonical_course_norm and payment_course_norm == canonical_course_norm:
+            score += 180
+        elif canonical_course_norm and payment_course_norm and (
+            canonical_course_norm in payment_course_norm or payment_course_norm in canonical_course_norm
+        ):
+            score += 120
+
+        payment_amount_digits = _amount_digits(payment.get("amount"))
+        if amount_digits and payment_amount_digits and amount_digits == payment_amount_digits:
+            score += 120
+
+        payment_phone_digits = _phone_digits(payment.get("phone") or payment.get("phone_normalized"))
+        if phone_digits and payment_phone_digits and (
+            phone_digits == payment_phone_digits
+            or phone_digits.endswith(payment_phone_digits)
+            or payment_phone_digits.endswith(phone_digits)
+        ):
+            score += 140
+
+        payer_name_norm = _normalize(payment.get("payer_name"))
+        if name_norm and payer_name_norm:
+            if name_norm == payer_name_norm:
+                score += 140
+            elif name_norm in payer_name_norm or payer_name_norm in name_norm:
+                score += 100
+
+        if score > best_score:
+            best = payment
+            best_score = score
+
+    if not best:
+        return None
+
+    # Without an email already on the ticket, require a stronger match than
+    # just a fuzzy course title so we don't tag the wrong student.
+    minimum_score = 180 if current_email else 260
+    if best_score < minimum_score:
+        return None
+    return best
 
 
 def _snapshot_from_contact(contact, *, name="", phone_number="", courses=None, event_type="manual.contact_added"):
