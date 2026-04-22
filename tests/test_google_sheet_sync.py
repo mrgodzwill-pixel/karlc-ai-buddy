@@ -268,6 +268,31 @@ class GoogleSheetSyncTests(unittest.TestCase):
         mock_update_values.assert_called_once()
         mock_append.assert_not_called()
 
+    def test_sync_student_record_skips_sheet_write_for_non_enrolled_student(self):
+        google_sheet_sync = importlib.import_module("google_sheet_sync")
+
+        student = {
+            "email": "pending@example.com",
+            "name": "Pending Student",
+            "phone": "639111111111",
+            "courses": [{"name": "Course A", "status": "sold"}],
+            "tags": ["TAG_A"],
+        }
+
+        with patch.object(google_sheet_sync, "available", return_value=True), \
+             patch.object(google_sheet_sync, "_ensure_headers"), \
+             patch.object(google_sheet_sync, "_get_sheet_values", return_value=[["email"]]), \
+             patch.object(google_sheet_sync, "_delete_rows") as mock_delete_rows, \
+             patch.object(google_sheet_sync, "_update_values") as mock_update_values, \
+             patch.object(google_sheet_sync, "_append_values") as mock_append:
+            result = google_sheet_sync.sync_student_record(student)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action"], "skipped_not_enrolled")
+        mock_delete_rows.assert_not_called()
+        mock_update_values.assert_not_called()
+        mock_append.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

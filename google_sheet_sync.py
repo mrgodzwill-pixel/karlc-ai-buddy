@@ -137,7 +137,12 @@ def _normalize_list(values: Iterable[str], *, excluded_values=None):
 
 
 def _student_row_values(student: dict):
-    courses = [course.get("name", "") for course in student.get("courses", []) if course.get("name")]
+    courses = [
+        course.get("name", "")
+        for course in student.get("courses", [])
+        if course.get("name")
+        and str(course.get("status") or "enrolled").lower() == "enrolled"
+    ]
     tags = student.get("tags", [])
     return [
         str(student.get("email") or "").strip().lower(),
@@ -293,10 +298,29 @@ def sync_student_record(student: dict, allow_append=True):
         row_values = [_student_row_values(student)]
         matching_rows = _find_rows_by_email(email)
         duplicates_removed = 0
+        has_enrolled_courses = bool(row_values[0][1].strip())
         if len(matching_rows) > 1:
             _delete_rows(matching_rows[1:])
             duplicates_removed = len(matching_rows) - 1
         row_number = matching_rows[0] if matching_rows else None
+        if not has_enrolled_courses:
+            if row_number:
+                _delete_rows([row_number])
+                duplicates_removed += 1
+                return {
+                    "ok": True,
+                    "row": None,
+                    "action": "removed_not_enrolled",
+                    "email": email,
+                    "duplicates_removed": duplicates_removed,
+                }
+            return {
+                "ok": True,
+                "row": None,
+                "action": "skipped_not_enrolled",
+                "email": email,
+                "duplicates_removed": duplicates_removed,
+            }
         if row_number:
             _update_values(_sheet_range(f"A{row_number}:E{row_number}"), row_values)
             return {
@@ -377,7 +401,8 @@ def sync_all_students():
         return {"ok": False, "message": "Google Sheet write-back is not configured."}
 
     with file_lock(_SHEET_WRITE_LOCK_FILE):
-        students = load_student_store().get("students", [])
+        all_students = load_student_store().get("students", [])
+        students = [student for student in all_students if _student_row_values(student)[1].strip()]
         updated = 0
         appended = 0
         errors = []

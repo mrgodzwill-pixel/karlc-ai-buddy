@@ -199,7 +199,11 @@ def _store_known_systeme_emails():
         email = str(student.get("email") or "").strip().lower()
         if not email:
             continue
-        courses = [course for course in student.get("courses", []) if isinstance(course, dict)]
+        courses = [
+            course
+            for course in student.get("courses", [])
+            if isinstance(course, dict) and str(course.get("status") or "").lower() == "enrolled"
+        ]
         if courses:
             emails.add(email)
     return emails
