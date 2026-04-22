@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from html import unescape
 
 import gmail_imap
-from config import DATA_DIR, OWNER_EMAIL, SYSTEME_SENDER
+from config import COURSES, DATA_DIR, OWNER_EMAIL, SYSTEME_SENDER
 from course_mapping import canonical_course_name, canonical_course_names_from_tags
 from storage import save_json
 import systeme_api
@@ -57,6 +57,36 @@ _ENROLMENT_QUERY_TEMPLATES = (
     f"to:{SYSTEME_SENDER} newer_than:{{days_back}}d",
     f'"{SYSTEME_SENDER}" newer_than:{{days_back}}d',
 )
+
+
+def _amount_to_number(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    match = re.search(r"([\d,]+(?:\.\d{1,2})?)", text.replace("₱", ""))
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _course_keys_by_amount():
+    mapping = {}
+    for course in COURSES.values():
+        price = course.get("price")
+        if price in ("", None):
+            continue
+        try:
+            price_value = float(price)
+        except (TypeError, ValueError):
+            continue
+        course_key = _normalise_course_key(course.get("name", ""))
+        if not course_key:
+            continue
+        mapping.setdefault(price_value, set()).add(course_key)
+    return mapping
 
 
 def _is_system_email(email_addr):
@@ -201,6 +231,22 @@ def _normalise_course_key(course_name):
     return re.sub(r"\s+", " ", canonical).strip().lower()
 
 
+_COURSE_KEYS_BY_AMOUNT = _course_keys_by_amount()
+
+
+def _infer_enrolled_course_key_from_amount(amount, enrolled_course_keys):
+    amount_value = _amount_to_number(amount)
+    if amount_value is None:
+        return ""
+
+    candidates = set(_COURSE_KEYS_BY_AMOUNT.get(amount_value, set()))
+    if enrolled_course_keys:
+        candidates &= set(enrolled_course_keys)
+    if len(candidates) == 1:
+        return next(iter(candidates))
+    return ""
+
+
 def _store_known_systeme_courses():
     """Return known Systeme student emails mapped to enrolled course keys."""
     courses_by_email = {}
@@ -311,6 +357,20 @@ def _payment_is_enrolled(payment, enrolled_by_email, generic_emails):
         return False
     payment_course_key = _normalise_course_key(payment.get("course", ""))
     enrolled_course_keys = enrolled_by_email.get(email, set())
+    raw_course = str(payment.get("course_raw") or payment.get("course", "")).strip()
+    strict_canonical_course = canonical_course_name(raw_course, allow_old_fallback=False)
+
+    # If Xendit's saved course text is weak/generic but the paid amount maps
+    # uniquely to one of the student's enrolled courses, treat it as matched.
+    inferred_course_key = ""
+    if enrolled_course_keys and not strict_canonical_course:
+        inferred_course_key = _infer_enrolled_course_key_from_amount(
+            payment.get("amount", ""),
+            enrolled_course_keys,
+        )
+        if inferred_course_key:
+            return True
+
     if payment_course_key:
         return payment_course_key in enrolled_course_keys
     return bool(enrolled_course_keys) or email in generic_emails
