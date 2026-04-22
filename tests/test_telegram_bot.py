@@ -17,16 +17,21 @@ class TelegramBotCommandTests(unittest.TestCase):
     def test_register_bot_commands_uses_set_my_commands(self):
         response = type("Resp", (), {"json": lambda self: {"ok": True}})()
 
-        with patch("telegram_bot.requests.post", return_value=response) as post:
+        with patch.object(telegram_bot, "TELEGRAM_CHAT_ID", "123456"), patch(
+            "telegram_bot.requests.post", return_value=response
+        ) as post:
             ok = telegram_bot.register_bot_commands()
 
         self.assertTrue(ok)
-        post.assert_called_once()
-        self.assertIn("/setMyCommands", post.call_args.kwargs["url"] if "url" in post.call_args.kwargs else post.call_args.args[0])
-        self.assertEqual(
-            post.call_args.kwargs["json"]["commands"] if "json" in post.call_args.kwargs else post.call_args.args[1]["commands"],
-            telegram_bot.TELEGRAM_COMMANDS,
-        )
+        self.assertEqual(post.call_count, 3)
+        payloads = [
+            call.kwargs["json"] if "json" in call.kwargs else call.args[1]
+            for call in post.call_args_list
+        ]
+        self.assertIn("/setMyCommands", post.call_args.args[0] if post.call_args.args else post.call_args.kwargs["url"])
+        self.assertEqual(payloads[0]["commands"], telegram_bot.TELEGRAM_COMMANDS)
+        self.assertEqual(payloads[1]["scope"], {"type": "all_private_chats"})
+        self.assertEqual(payloads[2]["scope"], {"type": "chat", "chat_id": "123456"})
 
     def test_parse_follow_command(self):
         ticket_id, contact_name, phone_number = telegram_bot._parse_follow_command(

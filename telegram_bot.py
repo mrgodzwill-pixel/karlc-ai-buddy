@@ -47,6 +47,17 @@ TELEGRAM_COMMANDS = [
     {"command": "systeme_enroll", "description": "Tag/enroll student in Systeme"},
 ]
 
+
+def _telegram_command_scopes():
+    scopes = [
+        None,
+        {"type": "all_private_chats"},
+    ]
+    chat_id = str(TELEGRAM_CHAT_ID or "").strip()
+    if chat_id:
+        scopes.append({"type": "chat", "chat_id": chat_id})
+    return scopes
+
 # Conversation history for AI chat
 CONVERSATION_FILE = os.path.join(DATA_DIR, "conversation_history.json")
 
@@ -205,18 +216,24 @@ def get_updates(offset=None):
 def register_bot_commands():
     """Register Telegram slash commands so typing `/` shows the command list."""
     url = f"{TELEGRAM_API_URL}/setMyCommands"
-    payload = {"commands": TELEGRAM_COMMANDS}
-    try:
-        response = requests.post(url, json=payload, timeout=15)
-        data = response.json()
-        if not data.get("ok"):
-            logger.warning("Telegram setMyCommands failed: %s", data)
-            return False
-        logger.info("Telegram slash commands registered: %s", len(TELEGRAM_COMMANDS))
-        return True
-    except Exception:
-        logger.exception("Telegram setMyCommands request failed")
-        return False
+    success = False
+    for scope in _telegram_command_scopes():
+        payload = {"commands": TELEGRAM_COMMANDS}
+        if scope:
+            payload["scope"] = scope
+        try:
+            response = requests.post(url, json=payload, timeout=15)
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning("Telegram setMyCommands failed for scope %s: %s", scope or "default", data)
+                continue
+            success = True
+        except Exception:
+            logger.exception("Telegram setMyCommands request failed for scope %s", scope or "default")
+
+    if success:
+        logger.info("Telegram slash commands registered across available scopes: %s", len(TELEGRAM_COMMANDS))
+    return success
 
 
 def clean_markdown_for_telegram(text):
@@ -312,6 +329,7 @@ def send_approval_results(results):
 
 def send_help():
     """Send help/command list."""
+    register_bot_commands()
     msg = "🤖 *KarlC AI Buddy*\n"
     msg += f"📄 Page: {PAGE_NAME}\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
