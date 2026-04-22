@@ -121,7 +121,7 @@ class EnrollmentCheckerTests(unittest.TestCase):
 
         self.assertEqual(report["total_payments"], 1)
         self.assertEqual(report["payments"][0]["email"], "payer@example.com")
-        self.assertEqual(report["payments"][0]["course"], "MikroTik Basic (QuickStart)")
+        self.assertEqual(report["payments"][0]["course"], "MikroTik QuickStart: Configure From Scratch")
 
     def test_compare_payments_persists_local_xendit_store(self):
         messages = {
@@ -212,7 +212,7 @@ class EnrollmentCheckerTests(unittest.TestCase):
         self.assertEqual(report["matched"], 1)
         self.assertEqual(report["payments"][0]["email"], "student@example.com")
 
-    def test_compare_payments_can_match_enrolments_found_via_to_query(self):
+    def test_compare_payments_does_not_trust_email_only_enrolment_message_for_course_match(self):
         messages = {
             f"from:{enrollment_checker.SYSTEME_SENDER} newer_than:7d": [],
             f"to:{enrollment_checker.SYSTEME_SENDER} newer_than:7d": [
@@ -251,7 +251,8 @@ class EnrollmentCheckerTests(unittest.TestCase):
                                 report = enrollment_checker.compare_payments_vs_enrolments(days_back=7)
 
         self.assertEqual(report["total_enrolments"], 1)
-        self.assertEqual(report["matched"], 1)
+        self.assertEqual(report["matched"], 0)
+        self.assertEqual(report["unmatched"], 1)
 
     def test_compare_payments_uses_direct_systeme_store_when_available(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -335,6 +336,56 @@ class EnrollmentCheckerTests(unittest.TestCase):
         self.assertEqual(report["matched"], 1)
         self.assertEqual(report["unmatched"], 0)
 
+    def test_compare_payments_requires_same_course_for_same_email(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payments_file = os.path.join(tmpdir, "xendit_payments.json")
+            with patch.object(enrollment_checker, "DATA_DIR", tmpdir):
+                with patch.object(xendit_payments, "XENDIT_PAYMENTS_FILE", payments_file):
+                    xendit_payments.upsert_payment_records([
+                        {
+                            "status": "paid",
+                            "email": "student@example.com",
+                            "course": "MikroTik Traffic Control",
+                            "amount": "PHP 749",
+                            "source": "xendit_payment_webhook",
+                            "xendit_payment_id": "py-traffic",
+                            "date": "2026-04-18T01:35:00Z",
+                            "paid_at": "2026-04-18T01:35:00Z",
+                        }
+                    ])
+                    with patch("enrollment_checker.xendit_api.available", return_value=False):
+                        with patch("enrollment_checker.gmail_imap.available", return_value=True):
+                            with patch(
+                                "enrollment_checker.list_recent_systeme_enrolments",
+                                return_value=[],
+                            ), patch(
+                                "enrollment_checker._search_enrolment_messages",
+                                return_value=[],
+                            ), patch(
+                                "enrollment_checker.load_student_store",
+                                return_value={
+                                    "checked_at": "2026-04-18T10:30:00+08:00",
+                                    "students": [
+                                        {
+                                            "email": "student@example.com",
+                                            "courses": [
+                                                {
+                                                    "name": "MikroTik QuickStart: Configure From Scratch",
+                                                    "status": "enrolled",
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                },
+                            ), patch(
+                                "enrollment_checker.systeme_api.available",
+                                return_value=False,
+                            ):
+                                report = enrollment_checker.compare_payments_vs_enrolments(days_back=7)
+
+        self.assertEqual(report["matched"], 0)
+        self.assertEqual(report["unmatched"], 1)
+
     def test_compare_payments_ignores_non_enrolled_systeme_store_courses(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             payments_file = os.path.join(tmpdir, "xendit_payments.json")
@@ -417,13 +468,56 @@ class EnrollmentCheckerTests(unittest.TestCase):
                                 "enrollment_checker.systeme_api.find_contact_by_email",
                                 return_value={
                                     "email": "student@example.com",
-                                    "tags": [{"name": "XENDITBASICPAID"}],
+                                    "tags": [{"name": "XENDIT_HYBRID_PAID"}],
                                 },
                             ):
                                 report = enrollment_checker.compare_payments_vs_enrolments(days_back=7)
 
         self.assertEqual(report["matched"], 1)
         self.assertEqual(report["unmatched"], 0)
+
+    def test_compare_payments_does_not_confirm_via_wrong_systeme_contact_tag(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payments_file = os.path.join(tmpdir, "xendit_payments.json")
+            with patch.object(enrollment_checker, "DATA_DIR", tmpdir):
+                with patch.object(xendit_payments, "XENDIT_PAYMENTS_FILE", payments_file):
+                    xendit_payments.upsert_payment_records([
+                        {
+                            "status": "paid",
+                            "email": "student@example.com",
+                            "course": "MikroTik Hybrid",
+                            "amount": "PHP 1499",
+                            "source": "xendit_payment_webhook",
+                            "xendit_payment_id": "py-123",
+                            "date": "2026-04-18T01:35:00Z",
+                            "paid_at": "2026-04-18T01:35:00Z",
+                        }
+                    ])
+                    with patch("enrollment_checker.xendit_api.available", return_value=False):
+                        with patch("enrollment_checker.gmail_imap.available", return_value=True):
+                            with patch(
+                                "enrollment_checker.list_recent_systeme_enrolments",
+                                return_value=[],
+                            ), patch(
+                                "enrollment_checker._search_enrolment_messages",
+                                return_value=[],
+                            ), patch(
+                                "enrollment_checker.load_student_store",
+                                return_value={"checked_at": "", "students": []},
+                            ), patch(
+                                "enrollment_checker.systeme_api.available",
+                                return_value=True,
+                            ), patch(
+                                "enrollment_checker.systeme_api.find_contact_by_email",
+                                return_value={
+                                    "email": "student@example.com",
+                                    "tags": [{"name": "XENDIT_BASIC_PAID"}],
+                                },
+                            ):
+                                report = enrollment_checker.compare_payments_vs_enrolments(days_back=7)
+
+        self.assertEqual(report["matched"], 0)
+        self.assertEqual(report["unmatched"], 1)
 
     def test_format_comparison_telegram_omits_matched_student_dump(self):
         report = {

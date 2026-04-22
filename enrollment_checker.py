@@ -14,6 +14,7 @@ from html import unescape
 
 import gmail_imap
 from config import DATA_DIR, OWNER_EMAIL, SYSTEME_SENDER
+from course_mapping import canonical_course_name, canonical_course_names_from_tags
 from storage import save_json
 import systeme_api
 import xendit_api
@@ -119,11 +120,14 @@ def _unavailable_report():
 
 
 def _record_to_payment_row(record):
+    raw_course = record.get("course") or record.get("description") or record.get("subject", "")
+    course = canonical_course_name(raw_course, allow_old_fallback=True) or str(raw_course or "").strip()
     return {
         "payer_name": record.get("payer_name", ""),
         "email": record.get("email", ""),
         "phone": record.get("phone", "") or record.get("phone_normalized", ""),
-        "course": record.get("course") or record.get("description") or record.get("subject", ""),
+        "course": course,
+        "course_raw": raw_course,
         "amount": record.get("amount", "N/A"),
         "payment_method": record.get("payment_method", ""),
         "subject": record.get("subject", ""),
@@ -192,60 +196,137 @@ def _search_enrolment_messages(days_back=7):
     return list(combined.values())
 
 
-def _store_known_systeme_emails():
-    """Return known Systeme student emails with any stored course access."""
-    emails = set()
+def _normalise_course_key(course_name):
+    canonical = canonical_course_name(course_name, allow_old_fallback=True) or str(course_name or "").strip()
+    return re.sub(r"\s+", " ", canonical).strip().lower()
+
+
+def _store_known_systeme_courses():
+    """Return known Systeme student emails mapped to enrolled course keys."""
+    courses_by_email = {}
     for student in load_student_store().get("students", []):
         email = str(student.get("email") or "").strip().lower()
         if not email:
             continue
-        courses = [
-            course
+        course_keys = {
+            _normalise_course_key(course.get("name", ""))
             for course in student.get("courses", [])
-            if isinstance(course, dict) and str(course.get("status") or "").lower() == "enrolled"
-        ]
-        if courses:
-            emails.add(email)
-    return emails
+            if isinstance(course, dict)
+            and str(course.get("status") or "").lower() == "enrolled"
+            and str(course.get("name") or "").strip()
+        }
+        course_keys.discard("")
+        if course_keys:
+            courses_by_email.setdefault(email, set()).update(course_keys)
+    return courses_by_email
 
 
-def _contact_has_paid_like_access(contact):
-    """Best-effort check for a Systeme contact that likely has paid course access."""
+def _contact_course_keys(contact):
+    """Best-effort extraction of course keys from Systeme contact tags."""
     if not isinstance(contact, dict):
-        return False
+        return set()
 
+    tag_names = []
     for tag in contact.get("tags") or []:
         if isinstance(tag, dict):
-            tag_name = str(tag.get("name") or tag.get("label") or "").strip().lower()
+            tag_name = str(tag.get("name") or tag.get("label") or "").strip()
         else:
-            tag_name = str(tag or "").strip().lower()
-        if not tag_name:
-            continue
-        compact = tag_name.replace("_", "").replace("-", "").replace(" ", "")
-        if "paid" in compact or compact.startswith("xendit"):
-            return True
-    return False
+            tag_name = str(tag or "").strip()
+        if tag_name:
+            tag_names.append(tag_name)
+
+    return {
+        _normalise_course_key(name)
+        for name in canonical_course_names_from_tags(tag_names, allow_old_fallback=True)
+        if _normalise_course_key(name)
+    }
 
 
-def _confirm_systeme_contact_emails(candidate_emails):
-    """Check Systeme API directly for contacts that likely already have course access."""
+def _confirm_systeme_contact_payments(candidate_payments):
+    """Check Systeme API directly for contacts that already have the same course access."""
     confirmed = set()
     if not systeme_api.available():
         return confirmed
 
-    for email in sorted({str(email or "").strip().lower() for email in candidate_emails if str(email or "").strip()}):
-        try:
-            contact = systeme_api.find_contact_by_email(email, timeout=15)
-        except Exception:
-            logger.exception("Systeme API contact lookup failed for %s", email)
+    contact_cache = {}
+    for payment in candidate_payments or []:
+        email = str(payment.get("email") or "").strip().lower()
+        course_key = _normalise_course_key(payment.get("course", ""))
+        if not email:
             continue
 
-        if _contact_has_paid_like_access(contact):
-            confirmed.add(email)
+        if email not in contact_cache:
+            try:
+                contact_cache[email] = systeme_api.find_contact_by_email(email, timeout=15)
+            except Exception:
+                logger.exception("Systeme API contact lookup failed for %s", email)
+                contact_cache[email] = None
+
+        contact_course_keys = _contact_course_keys(contact_cache.get(email))
+        if course_key:
+            if course_key in contact_course_keys:
+                confirmed.add((email, course_key))
+        elif contact_course_keys:
+            confirmed.add((email, course_key))
 
     if confirmed:
-        logger.info("Systeme API directly confirmed %s email(s) with paid-like access", len(confirmed))
+        logger.info("Systeme API directly confirmed %s payment-course match(es)", len(confirmed))
     return confirmed
+
+
+def _extract_enrolment_course(message):
+    subject = str((message or {}).get("subject") or "").strip()
+    body = str((message or {}).get("body") or "").strip()
+    for candidate in (subject, body):
+        canonical = canonical_course_name(candidate, allow_old_fallback=False)
+        if canonical:
+            return canonical
+    return ""
+
+
+def _enrolled_course_map(enrolments, store_courses_by_email):
+    enrolled_by_email = {
+        email: set(course_keys)
+        for email, course_keys in (store_courses_by_email or {}).items()
+        if email and course_keys
+    }
+    generic_emails = set()
+
+    for enrolment in enrolments or []:
+        email = str(enrolment.get("email") or "").strip().lower()
+        if not email:
+            continue
+        course_key = _normalise_course_key(enrolment.get("course", ""))
+        if course_key:
+            enrolled_by_email.setdefault(email, set()).add(course_key)
+        else:
+            generic_emails.add(email)
+
+    return enrolled_by_email, generic_emails
+
+
+def _payment_is_enrolled(payment, enrolled_by_email, generic_emails):
+    email = str(payment.get("email") or "").strip().lower()
+    if not email:
+        return False
+    payment_course_key = _normalise_course_key(payment.get("course", ""))
+    enrolled_course_keys = enrolled_by_email.get(email, set())
+    if payment_course_key:
+        return payment_course_key in enrolled_course_keys
+    return bool(enrolled_course_keys) or email in generic_emails
+
+
+def _payment_match_key(payment):
+    return (
+        str(payment.get("email") or "").strip().lower(),
+        _normalise_course_key(payment.get("course", "")),
+    )
+
+
+def _total_known_enrolments(enrolled_by_email, generic_emails):
+    total = sum(len(course_keys) for course_keys in enrolled_by_email.values())
+    generic_only = {email for email in generic_emails if not enrolled_by_email.get(email)}
+    return total + len(generic_only)
 
 
 def compare_payments_vs_enrolments(days_back=7):
@@ -319,18 +400,23 @@ def compare_payments_vs_enrolments(days_back=7):
                 print(f"[Enrollment] Sample paid-like Xendit subjects missing payer email: {missing_email_subjects}")
 
     enrolments = []
-    seen_emails = set()
+    seen_enrolment_keys = set()
     direct_enrolments = list_recent_systeme_enrolments(days_back=days_back)
     if direct_enrolments:
         print(f"[Enrollment] Direct Systeme store has {len(direct_enrolments)} recent enrolment record(s)")
         for entry in direct_enrolments:
             student_email = str(entry.get("email") or "").strip().lower()
-            if not student_email or student_email in seen_emails:
+            course_name = canonical_course_name(entry.get("course", ""), allow_old_fallback=True) or str(
+                entry.get("course") or ""
+            ).strip()
+            enrolment_key = (student_email, _normalise_course_key(course_name))
+            if not student_email or enrolment_key in seen_enrolment_keys:
                 continue
-            seen_emails.add(student_email)
+            seen_enrolment_keys.add(enrolment_key)
             enrolments.append(
                 {
                     "email": student_email,
+                    "course": course_name,
                     "date": entry.get("date", ""),
                     "subject": entry.get("course", ""),
                 }
@@ -344,41 +430,45 @@ def compare_payments_vs_enrolments(days_back=7):
 
         for m in enrolment_msgs:
             student_email = _extract_enrolment_email(m.get("body", ""))
-            if not student_email or student_email in seen_emails:
+            course_name = _extract_enrolment_course(m)
+            enrolment_key = (student_email, _normalise_course_key(course_name))
+            if not student_email or enrolment_key in seen_enrolment_keys:
                 continue
-            seen_emails.add(student_email)
+            seen_enrolment_keys.add(enrolment_key)
             enrolments.append({
                 "email": student_email,
+                "course": course_name,
                 "date": m.get("date", ""),
                 "subject": m.get("subject", ""),
             })
 
     print(f"[Enrollment] Found {len(enrolments)} enrolment confirmations")
 
-    enrolled_emails = {e["email"] for e in enrolments}
-    store_emails = _store_known_systeme_emails()
-    if store_emails:
-        print(f"[Enrollment] Stored Systeme student store contributes {len(store_emails)} known email(s)")
-        enrolled_emails.update(store_emails)
+    store_courses_by_email = _store_known_systeme_courses()
+    if store_courses_by_email:
+        print(
+            f"[Enrollment] Stored Systeme student store contributes "
+            f"{sum(len(courses) for courses in store_courses_by_email.values())} known enrolled course row(s)"
+        )
+    enrolled_by_email, generic_emails = _enrolled_course_map(enrolments, store_courses_by_email)
 
     matched, unmatched = [], []
     for p in payments:
-        (matched if p["email"] in enrolled_emails else unmatched).append(p)
+        (matched if _payment_is_enrolled(p, enrolled_by_email, generic_emails) else unmatched).append(p)
 
     if unmatched:
-        confirmed_unmatched = _confirm_systeme_contact_emails([p.get("email", "") for p in unmatched])
+        confirmed_unmatched = _confirm_systeme_contact_payments(unmatched)
         if confirmed_unmatched:
-            enrolled_emails.update(confirmed_unmatched)
-            matched.extend([p for p in unmatched if p.get("email", "") in confirmed_unmatched])
-            unmatched = [p for p in unmatched if p.get("email", "") not in confirmed_unmatched]
+            matched.extend([p for p in unmatched if _payment_match_key(p) in confirmed_unmatched])
+            unmatched = [p for p in unmatched if _payment_match_key(p) not in confirmed_unmatched]
             print(
-                f"[Enrollment] Systeme API confirmed {len(confirmed_unmatched)} additional email(s); "
+                f"[Enrollment] Systeme API confirmed {len(confirmed_unmatched)} additional payment-course match(es); "
                 f"updated unmatched count is {len(unmatched)}"
             )
 
     report = {
         "total_payments": len(payments),
-        "total_enrolments": len(enrolments),
+        "total_enrolments": _total_known_enrolments(enrolled_by_email, generic_emails),
         "matched": len(matched),
         "unmatched": len(unmatched),
         "matched_students": matched,

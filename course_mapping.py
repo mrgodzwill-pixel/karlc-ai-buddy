@@ -83,6 +83,29 @@ _OFFICIAL_TAG_NAMES = {
     "bundle4": SYSTEME_TAG_BUNDLE4,
 }
 
+_TAG_TO_COURSE_KEY = {
+    str(tag_name).strip().lower(): course_key
+    for course_key, tag_name in _OFFICIAL_TAG_NAMES.items()
+    if str(tag_name).strip()
+}
+_TAG_TO_COURSE_KEY.update(
+    {
+        f"xendit_{tag_name}".lower(): course_key
+        for course_key, tag_name in _OFFICIAL_TAG_NAMES.items()
+        if str(tag_name).strip()
+    }
+)
+_TAG_TO_COURSE_KEY.update(
+    {
+        "basicpaid": "mikrotik_basic",
+        "xenditbasicpaid": "mikrotik_basic",
+        "xendit_basic_paid": "mikrotik_basic",
+        "bundle4paid": "bundle4",
+        "xenditbundle4paid": "bundle4",
+        "xendit_bundle4_paid": "bundle4",
+    }
+)
+
 _SPECIAL_QUERY_PATTERNS = {
     "mikrotik_basic": [
         "step-by-step kung paano mag-setup ng mikrotik routeros from scratch",
@@ -227,6 +250,11 @@ def course_key_from_query(course_query):
             return aliases[query]
 
     for query in queries:
+        for alias, course_key in aliases.items():
+            if query and (query in alias or alias in query):
+                return course_key
+
+    for query in queries:
         for course_key, canonical in _CANONICAL_COURSE_NAMES.items():
             canonical_norm = _normalize(canonical)
             if query == canonical_norm or query in canonical_norm or canonical_norm in query:
@@ -296,4 +324,37 @@ def official_tag_names_for_courses(course_names, *, allow_old_fallback=True):
             continue
         seen.add(normalized)
         ordered.append(tag_name)
+    return ordered
+
+
+def canonical_course_name_from_tag(tag_name, *, allow_old_fallback=True):
+    normalized = _normalize(tag_name)
+    if not normalized:
+        return ""
+
+    course_key = _TAG_TO_COURSE_KEY.get(normalized)
+    if course_key:
+        return _CANONICAL_COURSE_NAMES[course_key]
+
+    if not allow_old_fallback:
+        return ""
+
+    compact = normalized.replace("_", "").replace("-", "").replace(" ", "")
+    if "bundle" in compact or "3in1" in compact:
+        return "OLD Bundle Access"
+    if "paid" in compact or compact.startswith("xendit"):
+        return "OLD Course Access"
+    return ""
+
+
+def canonical_course_names_from_tags(tag_names, *, allow_old_fallback=True):
+    ordered = []
+    seen = set()
+    for tag_name in tag_names or []:
+        canonical = canonical_course_name_from_tag(tag_name, allow_old_fallback=allow_old_fallback)
+        normalized = _normalize(canonical)
+        if not canonical or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(canonical)
     return ordered
