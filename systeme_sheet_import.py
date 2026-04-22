@@ -22,7 +22,11 @@ from config import (
     SYSTEME_STUDENTS_BASELINE_LOCAL_CSV,
     SYSTEME_SHEET_EXCLUDED_TAGS,
 )
-from course_mapping import canonicalize_course_names, official_tag_names_for_courses
+from course_mapping import (
+    canonical_course_names_from_tags,
+    canonicalize_course_names,
+    official_tag_names_for_courses,
+)
 from systeme_students import upsert_systeme_student_snapshot
 from xendit_payments import find_payment_by_email
 
@@ -77,10 +81,15 @@ def _row_to_snapshot(row, imported_at):
         return None
 
     raw_courses = row.get("courses") or row.get("Courses") or ""
-    course_names = canonicalize_course_names([raw_courses], allow_old_fallback=False)
+    raw_tags = row.get("tags") or row.get("Tags") or ""
+    tag_values = _split_list_values(raw_tags)
+    course_names = canonicalize_course_names([raw_courses], allow_old_fallback=True)
+    for course_name in canonical_course_names_from_tags(tag_values, allow_old_fallback=True):
+        if course_name not in course_names:
+            course_names.append(course_name)
     tags = [
         tag
-        for tag in official_tag_names_for_courses(course_names, allow_old_fallback=False)
+        for tag in official_tag_names_for_courses(course_names, allow_old_fallback=True)
         if tag.lower() not in SYSTEME_SHEET_EXCLUDED_TAGS
     ]
 

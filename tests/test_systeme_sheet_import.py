@@ -117,6 +117,26 @@ class SystemeSheetImportTests(unittest.TestCase):
         )
         self.assertEqual(snapshot["tags"], ["PISOWIFI_PAID", "BUNDLE4_PAID"])
 
+    def test_import_summary_csv_text_recovers_courses_from_tags_when_course_text_is_missing_or_legacy(self):
+        csv_text = (
+            "email,courses,tags\n"
+            "\"legacy@example.com\",\"OLD Bundle Access\",\"BUNDLE_PAID, XENDIT_BASIC_PAID\"\n"
+        )
+
+        with patch("systeme_sheet_import.upsert_systeme_student_snapshot", return_value=True) as mock_upsert:
+            result = systeme_sheet_import.import_summary_csv_text(csv_text, source_label="legacy.csv")
+
+        self.assertTrue(result["ok"])
+        snapshot = mock_upsert.call_args[0][0]
+        self.assertEqual(
+            [course["name"] for course in snapshot["courses"]],
+            [
+                "OLD Bundle Access",
+                "MikroTik QuickStart: Configure From Scratch",
+            ],
+        )
+        self.assertEqual(snapshot["tags"], ["OLD_BUNDLE", "QUICKSTART_PAID"])
+
 
 if __name__ == "__main__":
     unittest.main()

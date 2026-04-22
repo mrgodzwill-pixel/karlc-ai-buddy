@@ -297,6 +297,28 @@ class GoogleSheetSyncTests(unittest.TestCase):
         )
         self.assertEqual(row[2], "PISOWIFI_PAID, BUNDLE4_PAID")
 
+    def test_student_row_values_preserves_legacy_access_markers_for_sheet_baseline(self):
+        google_sheet_sync = importlib.import_module("google_sheet_sync")
+
+        row = google_sheet_sync._student_row_values(
+            {
+                "email": "legacy@example.com",
+                "courses": [
+                    {
+                        "name": "OLD Bundle Access",
+                        "status": "enrolled",
+                    },
+                    {
+                        "name": "OLD Course Access",
+                        "status": "enrolled",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(row[1], "OLD Bundle Access, OLD Course Access")
+        self.assertEqual(row[2], "OLD_BUNDLE, OLD_COURSE")
+
     def test_sync_student_record_skips_sheet_write_for_non_enrolled_student(self):
         google_sheet_sync = importlib.import_module("google_sheet_sync")
 

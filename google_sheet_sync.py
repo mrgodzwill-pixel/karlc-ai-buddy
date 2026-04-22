@@ -144,8 +144,8 @@ def _student_row_values(student: dict):
         if course.get("name")
         and str(course.get("status") or "enrolled").lower() == "enrolled"
     ]
-    courses = canonicalize_course_names(raw_courses, allow_old_fallback=False)
-    tags = official_tag_names_for_courses(courses, allow_old_fallback=False)
+    courses = canonicalize_course_names(raw_courses, allow_old_fallback=True)
+    tags = official_tag_names_for_courses(courses, allow_old_fallback=True)
     return [
         str(student.get("email") or "").strip().lower(),
         _normalize_list(courses),

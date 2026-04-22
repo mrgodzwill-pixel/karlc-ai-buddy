@@ -311,6 +311,16 @@ def canonicalize_course_names(course_names, *, allow_old_fallback=True):
             continue
         seen.add(normalized)
         ordered.append(canonical)
+
+    specific_courses = {
+        course
+        for course in ordered
+        if course not in {"OLD Course Access", "OLD Bundle Access"}
+    }
+    if specific_courses and "OLD Course Access" in ordered:
+        ordered = [course for course in ordered if course != "OLD Course Access"]
+    if "Complete MikroTik Mastery Bundle" in ordered and "OLD Bundle Access" in ordered:
+        ordered = [course for course in ordered if course != "OLD Bundle Access"]
     return ordered
 
 
