@@ -24,6 +24,7 @@ from ticket_system import (
     create_enrollment_ticket,
     dedupe_enrollment_ticket_candidates,
     filter_resolved_enrollment_students,
+    resolve_matching_enrollment_tickets,
 )
 from enrollment_checker import compare_payments_vs_enrolments, format_comparison_telegram
 
@@ -357,7 +358,9 @@ def run_enrollment_check(notify_if_new_tickets=False):
         report["collapsed_unmatched_duplicates"] = max(collapsed_duplicates, 0)
         report["unmatched_students"] = active_unmatched
         report["unmatched"] = len(active_unmatched)
-        
+        auto_resolved_tickets = resolve_matching_enrollment_tickets(report.get("matched_students", []))
+        report["auto_resolved_pending_tickets"] = len(auto_resolved_tickets)
+
         new_tickets = 0
         for student in report.get("unmatched_students", []):
             ticket = create_enrollment_ticket(
@@ -382,6 +385,11 @@ def run_enrollment_check(notify_if_new_tickets=False):
             )
         if report.get("suppressed"):
             print(f"[Enrollment] Suppressed (manually resolved): {report['suppressed']}")
+        if report.get("auto_resolved_pending_tickets"):
+            print(
+                f"[Enrollment] Auto-resolved pending tickets now matched: "
+                f"{report['auto_resolved_pending_tickets']}"
+            )
         if new_tickets:
             print(f"[Enrollment] Created {new_tickets} new enrollment tickets")
 

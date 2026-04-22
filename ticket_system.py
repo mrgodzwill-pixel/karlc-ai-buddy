@@ -439,6 +439,45 @@ def resolve_all_pending_tickets(ticket_type=None):
     return resolved
 
 
+def resolve_matching_enrollment_tickets(students):
+    """Auto-resolve pending enrollment tickets that are now matched.
+
+    This keeps `/tickets` aligned with the latest `/enrollment` result when a
+    student was previously unmatched but later became properly enrolled under
+    the same email + course.
+    """
+    match_keys = {
+        _student_to_pending_ticket_key(student)
+        for student in students or []
+        if _student_to_pending_ticket_key(student)
+    }
+    if not match_keys:
+        return []
+
+    resolved = []
+    with file_lock(TICKETS_FILE):
+        tickets = _load_tickets()
+        for ticket in tickets:
+            if ticket.get("type") != "enrollment_incomplete":
+                continue
+            if ticket.get("status") != "pending":
+                continue
+            if _ticket_to_pending_key(ticket) not in match_keys:
+                continue
+
+            ticket["status"] = "done"
+            ticket["resolved_at"] = datetime.now(PHT).isoformat()
+            resolved.append(dict(ticket))
+
+        if resolved:
+            _save_tickets(tickets)
+
+    for ticket in resolved:
+        add_enrollment_resolution(ticket)
+
+    return resolved
+
+
 def prune_resolved_tickets(retention_days=None):
     """Delete resolved tickets after the configured retention window.
 

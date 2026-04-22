@@ -95,6 +95,39 @@ class HourlyMonitoringTests(unittest.TestCase):
         self.assertEqual(create_ticket.call_count, 1)
         self.assertEqual(report["unmatched_students"][0]["phone"], "639777235690")
 
+    def test_run_enrollment_check_auto_resolves_pending_ticket_when_case_becomes_matched(self):
+        base_report = {
+            "total_payments": 1,
+            "total_enrolments": 1,
+            "matched": 1,
+            "unmatched": 0,
+            "matched_students": [
+                {
+                    "payer_name": "Alexis Honculada",
+                    "email": "jaahonculada77@gmail.com",
+                    "course": "10G Core Part 2: OSPF & Advanced Routing",
+                    "amount": "PHP 977",
+                    "date": "2026-04-23T16:58:00+08:00",
+                }
+            ],
+            "unmatched_students": [],
+            "payments": [],
+            "enrolments": [],
+            "checked_at": "2026-04-23T17:00:00+08:00",
+        }
+
+        with patch("fb_agent.compare_payments_vs_enrolments", return_value=dict(base_report)), patch(
+            "fb_agent.filter_resolved_enrollment_students",
+            return_value=([], []),
+        ), patch(
+            "fb_agent.resolve_matching_enrollment_tickets",
+            return_value=[{"id": 182}],
+        ) as auto_resolve, patch("fb_agent.create_enrollment_ticket", return_value=None):
+            report = fb_agent.run_enrollment_check(notify_if_new_tickets=False)
+
+        auto_resolve.assert_called_once_with(base_report["matched_students"])
+        self.assertEqual(report["auto_resolved_pending_tickets"], 1)
+
     def test_run_hourly_support_watch_sends_reminder_for_pending_support_tickets(self):
         pending_ticket = {
             "id": 7,

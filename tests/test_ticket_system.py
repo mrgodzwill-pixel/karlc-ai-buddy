@@ -206,6 +206,37 @@ class TicketSystemResolutionTests(unittest.TestCase):
                 self.assertEqual(len(pending), 1)
                 self.assertEqual(pending[0]["phone_number"], "639777235690")
 
+    def test_resolve_matching_enrollment_tickets_marks_pending_case_done(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tickets_file = f"{tmpdir}/tickets.json"
+            overrides_file = f"{tmpdir}/resolved_enrollment_overrides.json"
+
+            with patch.object(ticket_system, "TICKETS_FILE", tickets_file), patch.object(
+                ticket_system, "ENROLLMENT_RESOLUTIONS_FILE", overrides_file
+            ):
+                ticket = ticket_system.create_enrollment_ticket(
+                    student_name="Alexis Honculada",
+                    student_email="jaahonculada77@gmail.com",
+                    course_title="10G Core Part 2: OSPF & Advanced Routing",
+                    price="PHP 977",
+                    date_paid="2026-04-23T16:58:00+08:00",
+                )
+
+                resolved = ticket_system.resolve_matching_enrollment_tickets(
+                    [
+                        {
+                            "email": " Jaahonculada77@gmail.com ",
+                            "course": " 10G Core Part 2: OSPF & Advanced Routing ",
+                            "amount": "PHP 977",
+                        }
+                    ]
+                )
+
+                refreshed = ticket_system.get_ticket(ticket["id"])
+                self.assertEqual(len(resolved), 1)
+                self.assertEqual(refreshed["status"], "done")
+                self.assertIsNotNone(refreshed["resolved_at"])
+
     def test_prune_resolved_tickets_removes_only_old_done_tickets(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tickets_file = f"{tmpdir}/tickets.json"
