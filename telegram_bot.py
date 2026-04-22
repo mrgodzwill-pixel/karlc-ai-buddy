@@ -29,6 +29,24 @@ _SYSTEME_BACKFILL_STATE_LOCK = threading.Lock()
 _SYSTEME_BACKFILL_RUNNING = False
 logger = logging.getLogger("telegram_bot")
 
+TELEGRAM_COMMANDS = [
+    {"command": "help", "description": "Show bot commands"},
+    {"command": "status", "description": "Check bot and ticket status"},
+    {"command": "report", "description": "Generate Facebook report now"},
+    {"command": "pending", "description": "Show pending Facebook replies"},
+    {"command": "keywords", "description": "Show auto-reply keywords"},
+    {"command": "tickets", "description": "Show pending student tickets"},
+    {"command": "done", "description": "Resolve ticket(s), e.g. /done 12"},
+    {"command": "follow", "description": "Send SMS follow-up for a ticket"},
+    {"command": "support", "description": "Show recent support emails"},
+    {"command": "enrollment", "description": "Run payment vs enrollment check"},
+    {"command": "students", "description": "Show enrolled students by course"},
+    {"command": "systeme_sync", "description": "Refresh sheet baseline + Xendit info"},
+    {"command": "systeme_api_sync", "description": "Run direct Systeme API backfill"},
+    {"command": "systeme_add", "description": "Create Systeme contact"},
+    {"command": "systeme_enroll", "description": "Tag/enroll student in Systeme"},
+]
+
 # Conversation history for AI chat
 CONVERSATION_FILE = os.path.join(DATA_DIR, "conversation_history.json")
 
@@ -182,6 +200,23 @@ def get_updates(offset=None):
     except Exception as e:
         print(f"[Telegram] Error getting updates: {e}")
         return []
+
+
+def register_bot_commands():
+    """Register Telegram slash commands so typing `/` shows the command list."""
+    url = f"{TELEGRAM_API_URL}/setMyCommands"
+    payload = {"commands": TELEGRAM_COMMANDS}
+    try:
+        response = requests.post(url, json=payload, timeout=15)
+        data = response.json()
+        if not data.get("ok"):
+            logger.warning("Telegram setMyCommands failed: %s", data)
+            return False
+        logger.info("Telegram slash commands registered: %s", len(TELEGRAM_COMMANDS))
+        return True
+    except Exception:
+        logger.exception("Telegram setMyCommands request failed")
+        return False
 
 
 def clean_markdown_for_telegram(text):
@@ -1047,6 +1082,7 @@ def start_listener():
     """Start the Telegram bot listener (long polling)."""
     print(f"[Telegram] Bot listener started at {datetime.now(PHT).strftime('%Y-%m-%d %H:%M:%S')} PHT")
     print(f"[Telegram] Listening for messages from chat_id: {TELEGRAM_CHAT_ID}")
+    register_bot_commands()
 
     offset = None
 

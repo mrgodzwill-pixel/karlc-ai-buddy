@@ -14,6 +14,20 @@ telegram_bot = importlib.import_module("telegram_bot")
 
 
 class TelegramBotCommandTests(unittest.TestCase):
+    def test_register_bot_commands_uses_set_my_commands(self):
+        response = type("Resp", (), {"json": lambda self: {"ok": True}})()
+
+        with patch("telegram_bot.requests.post", return_value=response) as post:
+            ok = telegram_bot.register_bot_commands()
+
+        self.assertTrue(ok)
+        post.assert_called_once()
+        self.assertIn("/setMyCommands", post.call_args.kwargs["url"] if "url" in post.call_args.kwargs else post.call_args.args[0])
+        self.assertEqual(
+            post.call_args.kwargs["json"]["commands"] if "json" in post.call_args.kwargs else post.call_args.args[1]["commands"],
+            telegram_bot.TELEGRAM_COMMANDS,
+        )
+
     def test_parse_follow_command(self):
         ticket_id, contact_name, phone_number = telegram_bot._parse_follow_command(
             "/follow 12 | Juan Dela Cruz | 09171234567"
