@@ -155,6 +155,20 @@ def run_hourly_support_watch():
             logger.exception("Could not notify Telegram")
 
 
+def run_hourly_ticket_cleanup():
+    logger.info("Running hourly resolved-ticket cleanup")
+    try:
+        from ticket_system import prune_resolved_tickets
+
+        removed = prune_resolved_tickets()
+        if removed:
+            logger.info("Resolved-ticket cleanup removed %s old ticket(s)", len(removed))
+        else:
+            logger.info("Resolved-ticket cleanup found nothing to prune")
+    except Exception:
+        logger.exception("Resolved-ticket cleanup error")
+
+
 def _next_run_at(hour_pht: int) -> datetime:
     """Return the next UTC datetime corresponding to `hour_pht:00` Philippine time."""
     now_pht = datetime.now(PHT)
@@ -185,6 +199,7 @@ def run_scheduler():
         if now >= next_hourly_enrollment:
             run_hourly_enrollment_watch()
             run_hourly_support_watch()
+            run_hourly_ticket_cleanup()
             next_hourly_enrollment = _next_hourly_run()
 
         if now >= next_morning:

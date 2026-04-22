@@ -6,7 +6,7 @@ Tracks student issues (DMs, enrollment problems) with pending/done states.
 import os
 from datetime import datetime, timedelta, timezone
 
-from config import DATA_DIR
+from config import DATA_DIR, TICKET_RESOLVED_RETENTION_DAYS
 from storage import file_lock, load_json, save_json
 
 PHT = timezone(timedelta(hours=8))
@@ -28,6 +28,21 @@ def _load_enrollment_resolutions():
 
 def _save_enrollment_resolutions(resolutions):
     save_json(ENROLLMENT_RESOLUTIONS_FILE, resolutions)
+
+
+def _ticket_timestamp(ticket, *fields):
+    for field in fields:
+        raw = str(ticket.get(field) or "").strip()
+        if not raw:
+            continue
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=PHT)
+        return parsed.astimezone(PHT)
+    return None
 
 
 def _normalise_enrollment_key(student_email="", course_title="", price="", date_paid=""):
@@ -422,6 +437,46 @@ def resolve_all_pending_tickets(ticket_type=None):
         add_enrollment_resolution(ticket)
 
     return resolved
+
+
+def prune_resolved_tickets(retention_days=None):
+    """Delete resolved tickets after the configured retention window.
+
+    Tickets are stored with full details in `tickets.json` when created. Once
+    they are resolved, we keep them around for a short retention window so they
+    remain visible/auditable, then prune them later. Enrollment suppression is
+    preserved separately via `resolved_enrollment_overrides.json`.
+    """
+    if retention_days is None:
+        retention_days = TICKET_RESOLVED_RETENTION_DAYS
+
+    try:
+        retention_days = max(0, int(retention_days))
+    except (TypeError, ValueError):
+        retention_days = TICKET_RESOLVED_RETENTION_DAYS
+
+    cutoff = datetime.now(PHT) - timedelta(days=retention_days)
+    removed = []
+    kept = []
+
+    with file_lock(TICKETS_FILE):
+        tickets = _load_tickets()
+        for ticket in tickets:
+            if ticket.get("status") != "done":
+                kept.append(ticket)
+                continue
+
+            resolved_at = _ticket_timestamp(ticket, "resolved_at", "created_at")
+            if resolved_at is None or resolved_at > cutoff:
+                kept.append(ticket)
+                continue
+
+            removed.append(ticket)
+
+        if removed:
+            _save_tickets(kept)
+
+    return removed
 
 
 def get_ticket(ticket_id):

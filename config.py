@@ -95,6 +95,13 @@ SEMAPHORE_ENABLED = bool(SEMAPHORE_API_KEY)
 # === Directories ===
 DATA_DIR = os.environ.get("DATA_DIR") or os.path.join(PROJECT_DIR, "data")
 REPORT_DIR = os.environ.get("REPORT_DIR") or os.path.join(DATA_DIR, "reports")
+try:
+    TICKET_RESOLVED_RETENTION_DAYS = max(
+        0,
+        int(os.environ.get("TICKET_RESOLVED_RETENTION_DAYS", "7")),
+    )
+except ValueError:
+    TICKET_RESOLVED_RETENTION_DAYS = 7
 
 # Ensure directories exist
 os.makedirs(DATA_DIR, exist_ok=True)

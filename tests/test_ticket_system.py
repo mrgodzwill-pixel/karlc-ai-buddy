@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 import ticket_system
@@ -204,6 +205,84 @@ class TicketSystemResolutionTests(unittest.TestCase):
                 self.assertIsNone(duplicate)
                 self.assertEqual(len(pending), 1)
                 self.assertEqual(pending[0]["phone_number"], "639777235690")
+
+    def test_prune_resolved_tickets_removes_only_old_done_tickets(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tickets_file = f"{tmpdir}/tickets.json"
+            overrides_file = f"{tmpdir}/resolved_enrollment_overrides.json"
+
+            old_done = {
+                "id": 1,
+                "type": "support_email",
+                "student_name": "Old Done",
+                "student_email": "old@example.com",
+                "course_title": "Need help",
+                "price": "",
+                "payment_method": "support_email",
+                "date_paid": "",
+                "fb_sender_id": "",
+                "extra_info": "Old detail",
+                "phone_number": "",
+                "status": "done",
+                "created_at": "2026-04-01T10:00:00+08:00",
+                "resolved_at": "2026-04-10T10:00:00+08:00",
+                "followup_history": [],
+            }
+            recent_done = {
+                "id": 2,
+                "type": "support_email",
+                "student_name": "Recent Done",
+                "student_email": "recent@example.com",
+                "course_title": "Need help",
+                "price": "",
+                "payment_method": "support_email",
+                "date_paid": "",
+                "fb_sender_id": "",
+                "extra_info": "Recent detail",
+                "phone_number": "",
+                "status": "done",
+                "created_at": "2026-04-20T10:00:00+08:00",
+                "resolved_at": "2026-04-22T10:00:00+08:00",
+                "followup_history": [],
+            }
+            pending_ticket = {
+                "id": 3,
+                "type": "enrollment_incomplete",
+                "student_name": "Pending",
+                "student_email": "pending@example.com",
+                "course_title": "MikroTik Hybrid",
+                "price": "PHP 1499",
+                "payment_method": "xendit",
+                "date_paid": "2026-04-22",
+                "fb_sender_id": "",
+                "extra_info": "",
+                "phone_number": "",
+                "status": "pending",
+                "created_at": "2026-04-22T11:00:00+08:00",
+                "resolved_at": None,
+                "followup_history": [],
+            }
+
+            class FixedDateTime(datetime):
+                @classmethod
+                def now(cls, tz=None):
+                    base = datetime(2026, 4, 23, 12, 0, 0, tzinfo=ticket_system.PHT)
+                    return base if tz is None else base.astimezone(tz)
+
+            with patch.object(ticket_system, "TICKETS_FILE", tickets_file), patch.object(
+                ticket_system, "ENROLLMENT_RESOLUTIONS_FILE", overrides_file
+            ), patch.object(ticket_system, "datetime", FixedDateTime):
+                ticket_system._save_tickets([old_done, recent_done, pending_ticket])
+
+                removed = ticket_system.prune_resolved_tickets(retention_days=7)
+                remaining = ticket_system._load_tickets()
+
+            self.assertEqual([ticket["id"] for ticket in removed], [1])
+            self.assertEqual({ticket["id"] for ticket in remaining}, {2, 3})
+            self.assertEqual(
+                {ticket["status"] for ticket in remaining if ticket["id"] == 3},
+                {"pending"},
+            )
 
 
 if __name__ == "__main__":
