@@ -16,6 +16,7 @@ from email.utils import parsedate_to_datetime
 from html import unescape
 
 from config import DATA_DIR
+from course_mapping import canonical_course_name
 from storage import file_lock, load_json, save_json
 
 PHT = timezone(timedelta(hours=8))
@@ -412,6 +413,11 @@ def _finalize_record(record):
     return final
 
 
+def _strict_course_key(value):
+    canonical = canonical_course_name(value, allow_old_fallback=False)
+    return str(canonical or "").strip().lower()
+
+
 def extract_payment_record(message):
     """Parse a Gmail Xendit message into a reusable local payment record."""
     subject = message.get("subject", "")
@@ -618,6 +624,11 @@ def _merge_record(existing, new_record):
     merged = dict(existing or {})
     for field, value in (new_record or {}).items():
         if value not in ("", None):
+            if field == "course":
+                existing_course_key = _strict_course_key(merged.get("course", ""))
+                new_course_key = _strict_course_key(value)
+                if existing_course_key and not new_course_key:
+                    continue
             merged[field] = value
     return _finalize_record(merged)
 
@@ -646,6 +657,10 @@ def _records_match(existing, new_record):
     if existing_email and new_email and existing_email == new_email:
         existing_time = _parse_timestamp(_payment_record_date(existing))
         new_time = _parse_timestamp(_payment_record_date(new_record))
+        existing_course_key = _strict_course_key(existing.get("course", ""))
+        new_course_key = _strict_course_key(new_record.get("course", ""))
+        if existing_course_key and new_course_key and existing_course_key != new_course_key:
+            return False
         if _timestamps_close(existing_time, new_time) and (
             existing.get("amount") == new_record.get("amount")
             or not existing.get("amount")

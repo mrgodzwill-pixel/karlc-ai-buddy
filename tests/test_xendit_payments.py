@@ -83,6 +83,63 @@ class XenditPaymentsTests(unittest.TestCase):
         self.assertEqual(record["email"], "juan@example.com")
         self.assertEqual(record["phone_normalized"], "639171234567")
 
+    def test_upsert_payment_records_keeps_same_email_same_amount_different_courses_separate(self):
+        first = {
+            "status": "paid",
+            "email": "jaahonculada77@gmail.com",
+            "course": "MikroTik Basic (QuickStart)",
+            "amount": "PHP 977",
+            "xendit_payment_id": "",
+            "xendit_invoice_id": "",
+            "payment_request_id": "",
+            "invoice_id": "",
+            "external_id": "",
+            "date": "2026-04-23T08:00:00+08:00",
+        }
+        second = {
+            "status": "paid",
+            "email": "jaahonculada77@gmail.com",
+            "course": "MikroTik 10G Core Part 2 (OSPF)",
+            "amount": "PHP 977",
+            "xendit_payment_id": "",
+            "xendit_invoice_id": "",
+            "payment_request_id": "",
+            "invoice_id": "",
+            "external_id": "",
+            "date": "2026-04-23T09:00:00+08:00",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payments_file = os.path.join(tmpdir, "xendit_payments.json")
+            with patch.object(xendit_payments, "XENDIT_PAYMENTS_FILE", payments_file):
+                store, merged = xendit_payments.upsert_payment_records([first, second])
+
+        self.assertEqual(len(store["payments"]), 2)
+        self.assertEqual(
+            {item["course"] for item in store["payments"]},
+            {"MikroTik Basic (QuickStart)", "MikroTik 10G Core Part 2 (OSPF)"},
+        )
+
+    def test_merge_record_keeps_explicit_course_when_new_record_is_generic(self):
+        existing = {
+            "status": "paid",
+            "email": "jaahonculada77@gmail.com",
+            "course": "MikroTik 10G Core Part 2 (OSPF)",
+            "amount": "PHP 977",
+            "date": "2026-04-23T09:00:00+08:00",
+        }
+        incoming = {
+            "status": "paid",
+            "email": "jaahonculada77@gmail.com",
+            "course": "Invoice for Alexis Honculada",
+            "amount": "PHP 977",
+            "date": "2026-04-23T09:00:00+08:00",
+        }
+
+        merged = xendit_payments._merge_record(existing, incoming)
+
+        self.assertEqual(merged["course"], "MikroTik 10G Core Part 2 (OSPF)")
+
 
 if __name__ == "__main__":
     unittest.main()
