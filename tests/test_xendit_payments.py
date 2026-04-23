@@ -140,6 +140,88 @@ class XenditPaymentsTests(unittest.TestCase):
 
         self.assertEqual(merged["course"], "MikroTik 10G Core Part 2 (OSPF)")
 
+    def test_build_sales_summary_dashboard_and_filtered_month(self):
+        records = [
+            {
+                "status": "paid",
+                "payer_name": "Juan Dela Cruz",
+                "email": "juan@example.com",
+                "course": "MikroTik Basic (QuickStart)",
+                "amount": "PHP 799",
+                "date": "2026-04-23T09:00:00+08:00",
+            },
+            {
+                "status": "paid",
+                "payer_name": "Maria Santos",
+                "email": "maria@example.com",
+                "course": "MikroTik Hybrid",
+                "amount": "PHP 1499",
+                "date": "2026-04-21T10:00:00+08:00",
+            },
+            {
+                "status": "paid",
+                "payer_name": "Maria Santos",
+                "email": "maria@example.com",
+                "course": "MikroTik Hybrid",
+                "amount": "PHP 1499",
+                "date": "2026-04-01T10:00:00+08:00",
+            },
+        ]
+
+        with patch("xendit_payments.load_payment_store", return_value={"checked_at": "2026-04-23T12:00:00+08:00", "payments": records}):
+            dashboard = xendit_payments.build_sales_summary(
+                now=xendit_payments.datetime(2026, 4, 23, 12, 0, tzinfo=xendit_payments.PHT)
+            )
+            month_hybrid = xendit_payments.build_sales_summary(
+                period="month",
+                course_query="hybrid",
+                now=xendit_payments.datetime(2026, 4, 23, 12, 0, tzinfo=xendit_payments.PHT),
+            )
+
+        self.assertEqual(dashboard["today"]["payments"], 1)
+        self.assertEqual(dashboard["today"]["revenue"], "PHP 799")
+        self.assertEqual(dashboard["week"]["payments"], 2)
+        self.assertEqual(dashboard["month"]["payments"], 3)
+        self.assertEqual(dashboard["top_courses"][0]["course"], "Hybrid Access Combo: IPoE + PPPoE")
+        self.assertEqual(month_hybrid["payments"], 2)
+        self.assertEqual(month_hybrid["revenue"], "PHP 2,998")
+
+    def test_format_sales_summary_mentions_period_and_latest(self):
+        with patch(
+            "xendit_payments.build_sales_summary",
+            return_value={
+                "checked_at": "2026-04-23T12:00:00+08:00",
+                "period": "month",
+                "period_label": "This Month",
+                "course_query": "hybrid",
+                "revenue": "PHP 2,998",
+                "payments": 2,
+                "customers": 1,
+                "by_course": [
+                    {
+                        "course": "Hybrid Access Combo: IPoE + PPPoE",
+                        "payments": 2,
+                        "amount": "PHP 2,998",
+                    }
+                ],
+                "latest": [
+                    {
+                        "payer_name": "Maria Santos",
+                        "email": "maria@example.com",
+                        "course": "Hybrid Access Combo: IPoE + PPPoE",
+                        "amount": "PHP 1,499",
+                        "date": "2026-04-23T09:00:00+08:00",
+                    }
+                ],
+            },
+        ):
+            text = xendit_payments.format_sales_summary(period="month", course_query="hybrid")
+
+        self.assertIn("Period: This Month", text)
+        self.assertIn("Filter: hybrid", text)
+        self.assertIn("Revenue: PHP 2,998", text)
+        self.assertIn("Latest Payments", text)
+
 
 if __name__ == "__main__":
     unittest.main()

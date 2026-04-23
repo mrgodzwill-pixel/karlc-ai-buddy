@@ -758,6 +758,262 @@ def list_recent_payments(days_back=7, require_email=False):
     return recent
 
 
+def list_paid_payments(require_email=False):
+    """Return all stored paid payments sorted newest-first."""
+    paid = []
+    for record in load_payment_store().get("payments", []):
+        if str(record.get("status") or "").lower() not in {"paid", "settled", "succeeded"}:
+            continue
+        if require_email and not str(record.get("email") or "").strip():
+            continue
+        paid.append(dict(record))
+
+    paid.sort(
+        key=lambda item: _parse_timestamp(_payment_record_date(item)) or datetime.min.replace(tzinfo=PHT),
+        reverse=True,
+    )
+    return paid
+
+
+def _amount_number(value):
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    match = re.search(r"([\d,]+(?:\.\d{1,2})?)", text.replace("₱", ""))
+    if not match:
+        return 0.0
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return 0.0
+
+
+def _canonical_course_display(record):
+    raw_course = record.get("course") or record.get("description") or record.get("subject") or ""
+    canonical = canonical_course_name(raw_course, allow_old_fallback=True)
+    return canonical or str(raw_course or "Unknown offer").strip() or "Unknown offer"
+
+
+def _matches_course_query(record, course_query):
+    query = str(course_query or "").strip()
+    if not query:
+        return True
+
+    normalized_query = _normalise_text(query)
+    if not normalized_query:
+        return True
+
+    canonical_query = canonical_course_name(query, allow_old_fallback=True)
+    canonical_record = _canonical_course_display(record)
+    if canonical_query:
+        return _normalise_text(canonical_record) == _normalise_text(canonical_query)
+
+    haystack = " ".join(
+        [
+            canonical_record,
+            str(record.get("course") or ""),
+            str(record.get("subject") or ""),
+            str(record.get("description") or ""),
+        ]
+    ).lower()
+    query_tokens = [token for token in normalized_query.split() if token]
+    return bool(query_tokens) and all(token in haystack for token in query_tokens)
+
+
+def _sales_window(period, now):
+    period = str(period or "dashboard").strip().lower()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if period == "today":
+        return "Today", today_start, now
+    if period == "yesterday":
+        yesterday_start = today_start - timedelta(days=1)
+        return "Yesterday", yesterday_start, today_start
+    if period == "week":
+        week_start = today_start - timedelta(days=today_start.weekday())
+        return "This Week", week_start, now
+    if period == "month":
+        month_start = today_start.replace(day=1)
+        return "This Month", month_start, now
+    if period == "all":
+        return "All Time", None, now
+    return "Dashboard", None, now
+
+
+def _records_for_window(records, start_dt, end_dt):
+    selected = []
+    for record in records:
+        record_time = _parse_timestamp(_payment_record_date(record))
+        if record_time is None:
+            continue
+        if start_dt and record_time < start_dt:
+            continue
+        if end_dt and record_time > end_dt:
+            continue
+        selected.append(record)
+    return selected
+
+
+def _summarize_sales_records(records, latest_limit=5):
+    total_amount = 0.0
+    unique_customers = set()
+    by_course = {}
+    latest = []
+
+    for record in records:
+        amount_value = _amount_number(record.get("amount"))
+        total_amount += amount_value
+
+        email = str(record.get("email") or "").strip().lower()
+        if email:
+            unique_customers.add(email)
+
+        course_name = _canonical_course_display(record)
+        course_entry = by_course.setdefault(course_name, {"course": course_name, "payments": 0, "amount_value": 0.0})
+        course_entry["payments"] += 1
+        course_entry["amount_value"] += amount_value
+
+    course_rows = sorted(
+        by_course.values(),
+        key=lambda item: (item["amount_value"], item["payments"], item["course"]),
+        reverse=True,
+    )
+    for row in course_rows:
+        row["amount"] = _format_amount(row["amount_value"])
+
+    for record in records[:latest_limit]:
+        latest.append(
+            {
+                "payer_name": record.get("payer_name") or "Unknown payer",
+                "email": record.get("email") or "no email",
+                "course": _canonical_course_display(record),
+                "amount": record.get("amount") or _format_amount(_amount_number(record.get("amount"))),
+                "date": _payment_record_date(record) or "",
+            }
+        )
+
+    return {
+        "payments": len(records),
+        "revenue_value": total_amount,
+        "revenue": _format_amount(total_amount),
+        "customers": len(unique_customers),
+        "by_course": course_rows,
+        "latest": latest,
+    }
+
+
+def build_sales_summary(period="dashboard", course_query="", latest_limit=5, course_limit=5, now=None):
+    """Build a stored-Xendit sales summary for Telegram or other views."""
+    now = now or datetime.now(PHT)
+    store = load_payment_store()
+    records = [record for record in list_paid_payments(require_email=False) if _matches_course_query(record, course_query)]
+    period_label, start_dt, end_dt = _sales_window(period, now)
+
+    if str(period or "dashboard").strip().lower() == "dashboard":
+        today_label, today_start, _ = _sales_window("today", now)
+        week_label, week_start, _ = _sales_window("week", now)
+        month_label, month_start, _ = _sales_window("month", now)
+        month_records = _records_for_window(records, month_start, now)
+        return {
+            "checked_at": store.get("checked_at", ""),
+            "period": "dashboard",
+            "period_label": period_label,
+            "course_query": str(course_query or "").strip(),
+            "today": _summarize_sales_records(_records_for_window(records, today_start, now), latest_limit=latest_limit),
+            "today_label": today_label,
+            "week": _summarize_sales_records(_records_for_window(records, week_start, now), latest_limit=latest_limit),
+            "week_label": week_label,
+            "month": _summarize_sales_records(month_records, latest_limit=latest_limit),
+            "month_label": month_label,
+            "top_courses": _summarize_sales_records(month_records, latest_limit=latest_limit)["by_course"][:course_limit],
+        }
+
+    selected_records = _records_for_window(records, start_dt, end_dt)
+    summary = _summarize_sales_records(selected_records, latest_limit=latest_limit)
+    summary.update(
+        {
+            "checked_at": store.get("checked_at", ""),
+            "period": str(period or "").strip().lower(),
+            "period_label": period_label,
+            "course_query": str(course_query or "").strip(),
+        }
+    )
+    return summary
+
+
+def format_sales_summary(period="dashboard", course_query="", latest_limit=5, course_limit=5):
+    """Format a stored Xendit sales summary for Telegram."""
+    summary = build_sales_summary(
+        period=period,
+        course_query=course_query,
+        latest_limit=latest_limit,
+        course_limit=course_limit,
+    )
+    checked_at = _parse_timestamp(summary.get("checked_at"))
+    checked_label = checked_at.strftime("%Y-%m-%d %H:%M") + " PHT" if checked_at else "unknown"
+    course_filter = str(summary.get("course_query") or "").strip()
+
+    if summary.get("period") == "dashboard":
+        lines = [
+            "💸 *Sales Dashboard*",
+            "━━━━━━━━━━━━━━━━━━",
+            f"🕐 Stored Xendit sync: {checked_label}",
+        ]
+        if course_filter:
+            lines.append(f"🔎 Filter: {course_filter}")
+        lines.extend(
+            [
+                "",
+                f"📅 {summary['today_label']}: {summary['today']['payments']} payments | {summary['today']['revenue']}",
+                f"🗓️ {summary['week_label']}: {summary['week']['payments']} payments | {summary['week']['revenue']}",
+                f"📦 {summary['month_label']}: {summary['month']['payments']} payments | {summary['month']['revenue']}",
+            ]
+        )
+        if summary.get("top_courses"):
+            lines.extend(["", "🏆 *Top Courses This Month:*"])
+            for item in summary["top_courses"]:
+                lines.append(f"• {item['course']} | {item['payments']} sales | {item['amount']}")
+        else:
+            lines.extend(["", "🏆 *Top Courses This Month:*", "• No sales found for this filter yet."])
+        lines.extend(
+            [
+                "",
+                "Try `/sales today`, `/sales week`, `/sales month`, `/sales all`, or `/sales hybrid`.",
+            ]
+        )
+        return "\n".join(lines)
+
+    lines = [
+        "💸 *Sales Summary*",
+        "━━━━━━━━━━━━━━━━━━",
+        f"🕐 Stored Xendit sync: {checked_label}",
+        f"📅 Period: {summary['period_label']}",
+    ]
+    if course_filter:
+        lines.append(f"🔎 Filter: {course_filter}")
+
+    lines.extend(
+        [
+            "",
+            f"💰 Revenue: {summary['revenue']}",
+            f"🧾 Payments: {summary['payments']}",
+            f"👥 Unique Customers: {summary['customers']}",
+        ]
+    )
+
+    if summary.get("by_course"):
+        lines.extend(["", "📚 *By Course:*"])
+        for item in summary["by_course"][:course_limit]:
+            lines.append(f"• {item['course']} | {item['payments']} sales | {item['amount']}")
+
+    if summary.get("latest"):
+        lines.extend(["", "🕒 *Latest Payments:*"])
+        for item in summary["latest"]:
+            lines.append(f"• {item['course']} | {item['amount']} | {item['payer_name']}")
+
+    return "\n".join(lines)
+
+
 def _extract_query_tokens(user_message):
     cleaned = re.sub(r"[^a-zA-Z0-9@\s.+-]", " ", str(user_message or "").lower())
     tokens = []

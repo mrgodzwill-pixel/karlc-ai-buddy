@@ -96,6 +96,26 @@ class TelegramBotCommandTests(unittest.TestCase):
         self.assertTrue(send_message.called)
         self.assertEqual(result, "students")
 
+    def test_process_message_sales_runs_dashboard_summary(self):
+        with patch("telegram_bot.send_sales_summary") as send_sales, patch(
+            "telegram_bot.send_message"
+        ) as send_message:
+            result = telegram_bot.process_message("/sales")
+
+        send_sales.assert_called_once_with(period="dashboard", course_query="")
+        self.assertTrue(send_message.called)
+        self.assertEqual(result, "sales")
+
+    def test_process_message_sales_month_with_filter(self):
+        with patch("telegram_bot.send_sales_summary") as send_sales, patch(
+            "telegram_bot.send_message"
+        ) as send_message:
+            result = telegram_bot.process_message("/sales month hybrid")
+
+        send_sales.assert_called_once_with(period="month", course_query="hybrid")
+        self.assertTrue(send_message.called)
+        self.assertEqual(result, "sales")
+
     def test_process_message_systeme_sync_runs_sheet_import(self):
         with patch("telegram_bot.send_systeme_sheet_sync") as send_sheet_sync, patch(
             "telegram_bot.send_message"

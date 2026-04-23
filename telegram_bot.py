@@ -32,6 +32,7 @@ logger = logging.getLogger("telegram_bot")
 TELEGRAM_COMMANDS = [
     {"command": "help", "description": "Show bot commands"},
     {"command": "status", "description": "Check bot and ticket status"},
+    {"command": "sales", "description": "Show stored Xendit sales summary"},
     {"command": "report", "description": "Generate Facebook report now"},
     {"command": "pending", "description": "Show pending Facebook replies"},
     {"command": "keywords", "description": "Show auto-reply keywords"},
@@ -342,6 +343,9 @@ def send_help():
     msg += "⏭️ /skip 2 4 - Skip specific replies\n"
     msg += "🔑 /keywords - View auto-reply keywords\n"
     msg += "📡 /status - Check agent status\n"
+    msg += "💸 /sales - Sales dashboard from stored Xendit payments\n"
+    msg += "💸 /sales today - Today's sales\n"
+    msg += "💸 /sales month hybrid - Filter sales by course keyword\n"
     msg += "🎫 /tickets - View pending student tickets\n"
     msg += "✅ /done 1 - Mark ticket #1 as resolved\n"
     msg += "✅ /done 1 2 3 - Mark multiple tickets as done\n"
@@ -420,6 +424,30 @@ def send_keywords_list():
             shown.add(preview)
 
     msg += "\n_Para mag-add/change, sabihin mo lang sa AI Buddy._"
+    send_message(msg)
+
+
+def _parse_sales_command(text):
+    tokens = text.strip().split()
+    args = tokens[1:] if len(tokens) > 1 else []
+    period = "dashboard"
+    course_query = ""
+    known_periods = {"today", "yesterday", "week", "month", "all"}
+
+    if args and args[0].lower() in known_periods:
+        period = args[0].lower()
+        course_query = " ".join(args[1:]).strip()
+    else:
+        course_query = " ".join(args).strip()
+
+    return period, course_query
+
+
+def send_sales_summary(period="dashboard", course_query=""):
+    """Send stored Xendit sales summary."""
+    from xendit_payments import format_sales_summary
+
+    msg = format_sales_summary(period=period, course_query=course_query)
     send_message(msg)
 
 
@@ -906,6 +934,7 @@ def chat_with_ai(user_message):
 def process_message(text):
     """Process incoming message - command or natural language."""
     text_lower = text.strip().lower()
+    tokens = text_lower.split()
 
     # === COMMANDS ===
     if text_lower in ["/start", "/help"]:
@@ -915,6 +944,12 @@ def process_message(text):
     if text_lower == "/status":
         send_status()
         return "status"
+
+    if tokens and tokens[0] in ["/sales", "/course_sales", "/coursesales"]:
+        period, course_query = _parse_sales_command(text)
+        send_message("⏳ Checking stored Xendit sales... sandali lang Boss!")
+        send_sales_summary(period=period, course_query=course_query)
+        return "sales"
 
     if text_lower == "/report":
         send_message("⏳ Generating report... sandali lang Boss!")
@@ -958,7 +993,6 @@ def process_message(text):
 
     # Match `/approve 1 2 3` but not `/approve_all` (handled above).
     # We split on whitespace and check the first token is exactly `/approve`.
-    tokens = text_lower.split()
     if tokens and tokens[0] == "/approve":
         numbers = [int(p) for p in tokens[1:] if p.isdigit()]
         if numbers:
