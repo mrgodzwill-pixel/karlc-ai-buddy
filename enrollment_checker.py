@@ -422,6 +422,25 @@ def _payment_match_key(payment):
     )
 
 
+def _is_non_enrolment_payment(payment):
+    """Return True for known paid items that are not Systeme enrolments."""
+    amount_value = _amount_to_number(payment.get("amount", ""))
+    if amount_value is None:
+        return False
+
+    payment_course_key = _normalise_course_key(payment.get("course", ""))
+    raw_course = str(payment.get("course_raw") or payment.get("course", "")).strip()
+    strict_canonical_course = canonical_course_name(raw_course, allow_old_fallback=False)
+    solar_course_key = _normalise_course_key("DIY Hybrid Solar Setup")
+
+    # Historical PHP 497 "DIY Hybrid Solar" purchases are a file-delivery /
+    # verified-email flow, not a Systeme enrolment product.
+    return (
+        abs(amount_value - 497.0) <= 2.0
+        and (payment_course_key == solar_course_key or _normalise_course_key(strict_canonical_course) == solar_course_key)
+    )
+
+
 def _total_known_enrolments(enrolled_by_email, generic_emails):
     total = sum(len(course_keys) for course_keys in enrolled_by_email.values())
     generic_only = {email for email in generic_emails if not enrolled_by_email.get(email)}
@@ -556,7 +575,15 @@ def compare_payments_vs_enrolments(days_back=7):
     enrolled_by_email, generic_emails = _enrolled_course_map(enrolments, store_courses_by_email)
 
     matched, unmatched = [], []
+    non_enrolment_payments = []
+    comparable_payments = []
     for p in payments:
+        if _is_non_enrolment_payment(p):
+            non_enrolment_payments.append(p)
+        else:
+            comparable_payments.append(p)
+
+    for p in comparable_payments:
         (matched if _payment_is_enrolled(p, enrolled_by_email, generic_emails) else unmatched).append(p)
 
     if unmatched:
@@ -580,6 +607,8 @@ def compare_payments_vs_enrolments(days_back=7):
         "payments": payments,
         "enrolments": enrolments,
         "checked_at": checked_at,
+        "non_enrolment_skipped": len(non_enrolment_payments),
+        "non_enrolment_payments": non_enrolment_payments,
     }
 
     report_file = os.path.join(DATA_DIR, "enrollment_report.json")
@@ -611,6 +640,8 @@ def format_comparison_telegram(report):
     msg += f"📚 Enrolled Course Rows: {report['total_enrolments']}\n"
     msg += f"🟢 Matched: {report['matched']}\n"
     msg += f"🔴 Unmatched: {report['unmatched']}\n\n"
+    if report.get("non_enrolment_skipped"):
+        msg += f"📦 Non-enrollment Items Skipped: {report['non_enrolment_skipped']}\n\n"
     if report.get("collapsed_unmatched_duplicates"):
         msg += (
             f"ℹ️ Repeated payment rows collapsed into ticket cases: "
@@ -647,6 +678,8 @@ def format_comparison_markdown(report):
     md += f"| Enrolled Course Rows | {report['total_enrolments']} |\n"
     md += f"| Matched | {report['matched']} |\n"
     md += f"| Unmatched | {report['unmatched']} |\n\n"
+    if report.get("non_enrolment_skipped"):
+        md += f"| Non-enrollment Items Skipped | {report['non_enrolment_skipped']} |\n\n"
 
     if report["unmatched_students"]:
         md += "#### Unmatched Students (Paid but NOT Enrolled)\n\n"

@@ -621,7 +621,7 @@ class EnrollmentCheckerTests(unittest.TestCase):
         self.assertEqual(report["matched"], 1)
         self.assertEqual(report["unmatched"], 0)
 
-    def test_compare_payments_can_match_legacy_file_delivery_amount(self):
+    def test_compare_payments_skips_legacy_file_delivery_item(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             payments_file = os.path.join(tmpdir, "xendit_payments.json")
             with patch.object(enrollment_checker, "DATA_DIR", tmpdir):
@@ -648,25 +648,13 @@ class EnrollmentCheckerTests(unittest.TestCase):
                         return_value=[],
                     ), patch(
                         "enrollment_checker.load_student_store",
-                        return_value={
-                            "checked_at": "2026-04-23T17:00:00+08:00",
-                            "students": [
-                                {
-                                    "email": "jmjtechalicia@gmail.com",
-                                    "courses": [
-                                        {
-                                            "name": "OLD Course Access",
-                                            "status": "enrolled",
-                                        }
-                                    ],
-                                }
-                            ],
-                        },
+                        return_value={"checked_at": "2026-04-23T17:00:00+08:00", "students": []},
                     ):
                         report = enrollment_checker.compare_payments_vs_enrolments(days_back=7)
 
-        self.assertEqual(report["matched"], 1)
+        self.assertEqual(report["matched"], 0)
         self.assertEqual(report["unmatched"], 0)
+        self.assertEqual(report["non_enrolment_skipped"], 1)
 
     def test_compare_payments_confirms_unmatched_via_systeme_contact_tags(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -762,6 +750,7 @@ class EnrollmentCheckerTests(unittest.TestCase):
             "total_enrolled_students": 1,
             "matched": 2,
             "unmatched": 0,
+            "non_enrolment_skipped": 1,
             "matched_students": [
                 {"email": "juan@example.com", "course": "Course A"},
                 {"email": "maria@example.com", "course": "Course B"},
@@ -775,6 +764,7 @@ class EnrollmentCheckerTests(unittest.TestCase):
         self.assertNotIn("juan@example.com", message)
         self.assertIn("Enrolled Students: 1", message)
         self.assertIn("Enrolled Course Rows: 2", message)
+        self.assertIn("Non-enrollment Items Skipped: 1", message)
 
 
 if __name__ == "__main__":
