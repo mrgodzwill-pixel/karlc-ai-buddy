@@ -116,6 +116,16 @@ class TelegramBotCommandTests(unittest.TestCase):
         self.assertTrue(send_message.called)
         self.assertEqual(result, "health")
 
+    def test_process_message_testimonies_runs_extractor(self):
+        with patch("telegram_bot.send_testimony_candidates") as send_testimonies, patch(
+            "telegram_bot.send_message"
+        ) as send_message:
+            result = telegram_bot.process_message("/testimonies 60")
+
+        send_testimonies.assert_called_once_with(days_back=60)
+        self.assertTrue(send_message.called)
+        self.assertEqual(result, "testimonies")
+
     def test_process_message_sales_month_with_filter(self):
         with patch("telegram_bot.send_sales_summary") as send_sales, patch(
             "telegram_bot.send_message"

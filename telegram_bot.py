@@ -34,6 +34,7 @@ TELEGRAM_COMMANDS = [
     {"command": "status", "description": "Check bot and ticket status"},
     {"command": "health", "description": "Check integration health and freshness"},
     {"command": "sales", "description": "Show stored Xendit sales summary"},
+    {"command": "testimonies", "description": "Find positive FB DMs/comments to reuse"},
     {"command": "report", "description": "Generate Facebook report now"},
     {"command": "pending", "description": "Show pending Facebook replies"},
     {"command": "keywords", "description": "Show auto-reply keywords"},
@@ -348,6 +349,8 @@ def send_help():
     msg += "💸 /sales - Sales dashboard from stored Xendit payments\n"
     msg += "💸 /sales today - Today's sales\n"
     msg += "💸 /sales month hybrid - Filter sales by course keyword\n"
+    msg += "🌟 /testimonies - Find positive FB comments/DMs to reuse\n"
+    msg += "🌟 /testimonies 60 - Scan a wider 60-day window\n"
     msg += "🎫 /tickets - View pending student tickets\n"
     msg += "✅ /done 1 - Mark ticket #1 as resolved\n"
     msg += "✅ /done 1 2 3 - Mark multiple tickets as done\n"
@@ -458,6 +461,20 @@ def send_sales_summary(period="dashboard", course_query=""):
 
     msg = format_sales_summary(period=period, course_query=course_query)
     send_message(msg)
+
+
+def _parse_testimonies_command(text):
+    tokens = text.strip().split()
+    if len(tokens) >= 2 and tokens[1].isdigit():
+        return max(1, min(int(tokens[1]), 365))
+    return 30
+
+
+def send_testimony_candidates(days_back=30):
+    """Send likely testimony candidates from FB comments and DMs."""
+    from testimony_extractor import format_testimony_candidates_telegram
+
+    send_message(format_testimony_candidates_telegram(days_back=days_back))
 
 
 def send_tickets():
@@ -958,6 +975,12 @@ def process_message(text):
         send_message("⏳ Checking bot health... sandali lang Boss!")
         send_health()
         return "health"
+
+    if tokens and tokens[0] in ["/testimonies", "/testimony", "/testimonial", "/testimonials"]:
+        days_back = _parse_testimonies_command(text)
+        send_message("⏳ Looking for strong positive FB comments/DMs... sandali lang Boss!")
+        send_testimony_candidates(days_back=days_back)
+        return "testimonies"
 
     if tokens and tokens[0] in ["/sales", "/course_sales", "/coursesales"]:
         period, course_query = _parse_sales_command(text)
