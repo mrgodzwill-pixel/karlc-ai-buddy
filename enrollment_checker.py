@@ -92,7 +92,6 @@ def _course_keys_by_amount():
     # enrollment comparison rescue, not for public price display.
     legacy_amounts = {
         1500.0: {"10G Core Part 3: Centralized Pisowifi Setup"},
-        3500.0: {"New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)"},
         3997.0: {"Complete MikroTik Mastery Bundle"},
     }
     for price_value, course_names in legacy_amounts.items():

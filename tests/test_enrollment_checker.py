@@ -574,7 +574,7 @@ class EnrollmentCheckerTests(unittest.TestCase):
         self.assertEqual(report["matched"], 1)
         self.assertEqual(report["unmatched"], 0)
 
-    def test_compare_payments_can_match_explicit_wrong_course_using_historical_dual_amount(self):
+    def test_compare_payments_does_not_guess_unknown_historical_amount_mapping(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             payments_file = os.path.join(tmpdir, "xendit_payments.json")
             with patch.object(enrollment_checker, "DATA_DIR", tmpdir):
@@ -608,7 +608,7 @@ class EnrollmentCheckerTests(unittest.TestCase):
                                     "email": "dual@example.com",
                                     "courses": [
                                         {
-                                            "name": "New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)",
+                                            "name": "OLD Bundle Access",
                                             "status": "enrolled",
                                         }
                                     ],
@@ -618,8 +618,8 @@ class EnrollmentCheckerTests(unittest.TestCase):
                     ):
                         report = enrollment_checker.compare_payments_vs_enrolments(days_back=7)
 
-        self.assertEqual(report["matched"], 1)
-        self.assertEqual(report["unmatched"], 0)
+        self.assertEqual(report["matched"], 0)
+        self.assertEqual(report["unmatched"], 1)
 
     def test_compare_payments_confirms_unmatched_via_systeme_contact_tags(self):
         with tempfile.TemporaryDirectory() as tmpdir:
