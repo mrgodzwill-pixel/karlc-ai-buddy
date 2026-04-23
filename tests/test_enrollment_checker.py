@@ -712,6 +712,7 @@ class EnrollmentCheckerTests(unittest.TestCase):
             "checked_at": "2026-04-18T16:00:00+08:00",
             "total_payments": 2,
             "total_enrolments": 2,
+            "total_enrolled_students": 1,
             "matched": 2,
             "unmatched": 0,
             "matched_students": [
@@ -725,6 +726,8 @@ class EnrollmentCheckerTests(unittest.TestCase):
 
         self.assertNotIn("Matched Students", message)
         self.assertNotIn("juan@example.com", message)
+        self.assertIn("Enrolled Students: 1", message)
+        self.assertIn("Enrolled Course Rows: 2", message)
 
 
 if __name__ == "__main__":

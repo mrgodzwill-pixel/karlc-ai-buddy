@@ -152,6 +152,7 @@ def _unavailable_report():
     return {
         "total_payments": 0,
         "total_enrolments": 0,
+        "total_enrolled_students": 0,
         "matched": 0,
         "unmatched": 0,
         "matched_students": [],
@@ -426,6 +427,10 @@ def _total_known_enrolments(enrolled_by_email, generic_emails):
     return total + len(generic_only)
 
 
+def _total_known_enrolled_students(enrolled_by_email, generic_emails):
+    return len({*enrolled_by_email.keys(), *generic_emails})
+
+
 def compare_payments_vs_enrolments(days_back=7):
     """Compare Xendit payments with Systeme.io enrollments."""
     print(f"[Enrollment] Comparing last {days_back} days...")
@@ -566,6 +571,7 @@ def compare_payments_vs_enrolments(days_back=7):
     report = {
         "total_payments": len(payments),
         "total_enrolments": _total_known_enrolments(enrolled_by_email, generic_emails),
+        "total_enrolled_students": _total_known_enrolled_students(enrolled_by_email, generic_emails),
         "matched": len(matched),
         "unmatched": len(unmatched),
         "matched_students": matched,
@@ -600,7 +606,8 @@ def format_comparison_telegram(report):
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
 
     msg += f"💰 Xendit Payments: {report['total_payments']}\n"
-    msg += f"✅ Systeme.io Enrollments: {report['total_enrolments']}\n"
+    msg += f"✅ Enrolled Students: {report.get('total_enrolled_students', 0)}\n"
+    msg += f"📚 Enrolled Course Rows: {report['total_enrolments']}\n"
     msg += f"🟢 Matched: {report['matched']}\n"
     msg += f"🔴 Unmatched: {report['unmatched']}\n\n"
     if report.get("collapsed_unmatched_duplicates"):
@@ -635,7 +642,8 @@ def format_comparison_markdown(report):
     md += "| Metric | Count |\n"
     md += "|--------|-------|\n"
     md += f"| Xendit Payments | {report['total_payments']} |\n"
-    md += f"| Systeme.io Enrollments | {report['total_enrolments']} |\n"
+    md += f"| Enrolled Students | {report.get('total_enrolled_students', 0)} |\n"
+    md += f"| Enrolled Course Rows | {report['total_enrolments']} |\n"
     md += f"| Matched | {report['matched']} |\n"
     md += f"| Unmatched | {report['unmatched']} |\n\n"
 
