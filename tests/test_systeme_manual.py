@@ -128,6 +128,30 @@ class SystemeManualTests(unittest.TestCase):
         assign_tag.assert_called_once_with("501", "88")
         self.assertEqual(result["tag"]["name"], "BUNDLE_PAID")
 
+    def test_enroll_student_uses_old_course_fallback_tag_for_unknown_legacy_file(self):
+        contact = {"id": 501, "email": "juan@example.com"}
+        tag = {"id": 89, "name": "1KW_PAID"}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_file = os.path.join(tmpdir, "systeme_students.json")
+            with patch.object(systeme_students, "SYSTEME_STUDENTS_FILE", store_file), patch(
+                "systeme_manual.systeme_api.available", return_value=True
+            ), patch(
+                "systeme_manual.systeme_api.create_contact", return_value=contact
+            ), patch(
+                "systeme_manual.systeme_api.find_tag_by_name", return_value=tag
+            ), patch(
+                "systeme_manual.systeme_api.assign_tag_to_contact", return_value={}
+            ) as assign_tag:
+                result = systeme_manual.enroll_student(
+                    email="juan@example.com",
+                    course_query="Some Old Verified File Delivery 2024",
+                    name="Juan Dela Cruz",
+                )
+
+        assign_tag.assert_called_once_with("501", "89")
+        self.assertEqual(result["tag"]["name"], "1KW_PAID")
+
     def test_enroll_student_maps_invoice_style_old_title_to_quickstart_tag(self):
         contact = {"id": 501, "email": "ericjamison21@gmail.com"}
         tag = {"id": 99, "name": "QUICKSTART_PAID"}

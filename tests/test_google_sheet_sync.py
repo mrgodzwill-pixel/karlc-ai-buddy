@@ -317,7 +317,7 @@ class GoogleSheetSyncTests(unittest.TestCase):
         )
 
         self.assertEqual(row[1], "OLD Bundle Access, OLD Course Access")
-        self.assertEqual(row[2], "BUNDLE_PAID, OLD_COURSE")
+        self.assertEqual(row[2], "BUNDLE_PAID, 1KW_PAID")
 
     def test_sync_student_record_skips_sheet_write_for_non_enrolled_student(self):
         google_sheet_sync = importlib.import_module("google_sheet_sync")

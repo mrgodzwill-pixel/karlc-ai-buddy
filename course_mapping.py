@@ -97,6 +97,8 @@ _TAG_TO_COURSE_KEY.update(
 )
 _TAG_TO_COURSE_KEY.update(
     {
+        "1kw_paid": "old_course_access",
+        "xendit_1kw_paid": "old_course_access",
         "basicpaid": "mikrotik_basic",
         "xenditbasicpaid": "mikrotik_basic",
         "xendit_basic_paid": "mikrotik_basic",
@@ -300,7 +302,7 @@ def official_tag_name_for_course(course_query, *, allow_old_fallback=True):
     query = _normalize(course_query)
     if "bundle" in query or "3-in-1" in query or "3 in 1" in query or "3in1" in query:
         return "BUNDLE_PAID"
-    return "OLD_COURSE"
+    return "1KW_PAID"
 
 
 def canonicalize_course_names(course_names, *, allow_old_fallback=True):
@@ -346,6 +348,8 @@ def canonical_course_name_from_tag(tag_name, *, allow_old_fallback=True):
 
     course_key = _TAG_TO_COURSE_KEY.get(normalized)
     if course_key:
+        if course_key == "old_course_access":
+            return "OLD Course Access"
         if course_key == "old_bundle_access":
             return "OLD Bundle Access"
         return _CANONICAL_COURSE_NAMES[course_key]

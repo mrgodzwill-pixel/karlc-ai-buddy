@@ -91,6 +91,7 @@ def _course_keys_by_amount():
     # current config catalog has moved on. These aliases are only used for
     # enrollment comparison rescue, not for public price display.
     legacy_amounts = {
+        497.0: {"OLD Course Access"},
         1500.0: {"10G Core Part 3: Centralized Pisowifi Setup"},
         3500.0: {"OLD Bundle Access"},
         3997.0: {"Complete MikroTik Mastery Bundle"},

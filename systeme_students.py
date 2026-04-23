@@ -192,6 +192,8 @@ def _tag_course_mapping():
     mapping["xendit_bundle_paid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
     mapping["3-in-1paid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
     mapping["3in1paid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
+    mapping["1kw_paid"] = {"name": "OLD Course Access", "kind": "course"}
+    mapping["xendit_1kw_paid"] = {"name": "OLD Course Access", "kind": "course"}
     mapping["basicpaid"] = {"name": "MikroTik QuickStart: Configure From Scratch", "kind": "course"}
     mapping["xenditbasicpaid"] = {"name": "MikroTik QuickStart: Configure From Scratch", "kind": "course"}
     return mapping

@@ -197,7 +197,7 @@ def _fallback_old_tag_name(course_query):
     query = _normalize(course_query)
     if "bundle" in query or "3-in-1" in query or "3 in 1" in query or "3in1" in query:
         return "BUNDLE_PAID"
-    return "OLD_COURSE"
+    return "1KW_PAID"
 
 
 def _configured_tag_name(course_key):
