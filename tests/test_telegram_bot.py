@@ -106,6 +106,16 @@ class TelegramBotCommandTests(unittest.TestCase):
         self.assertTrue(send_message.called)
         self.assertEqual(result, "sales")
 
+    def test_process_message_health_runs_health_summary(self):
+        with patch("telegram_bot.send_health") as send_health, patch(
+            "telegram_bot.send_message"
+        ) as send_message:
+            result = telegram_bot.process_message("/health")
+
+        send_health.assert_called_once_with()
+        self.assertTrue(send_message.called)
+        self.assertEqual(result, "health")
+
     def test_process_message_sales_month_with_filter(self):
         with patch("telegram_bot.send_sales_summary") as send_sales, patch(
             "telegram_bot.send_message"

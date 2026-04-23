@@ -32,6 +32,7 @@ logger = logging.getLogger("telegram_bot")
 TELEGRAM_COMMANDS = [
     {"command": "help", "description": "Show bot commands"},
     {"command": "status", "description": "Check bot and ticket status"},
+    {"command": "health", "description": "Check integration health and freshness"},
     {"command": "sales", "description": "Show stored Xendit sales summary"},
     {"command": "report", "description": "Generate Facebook report now"},
     {"command": "pending", "description": "Show pending Facebook replies"},
@@ -343,6 +344,7 @@ def send_help():
     msg += "⏭️ /skip 2 4 - Skip specific replies\n"
     msg += "🔑 /keywords - View auto-reply keywords\n"
     msg += "📡 /status - Check agent status\n"
+    msg += "🩺 /health - Check integration health and freshness\n"
     msg += "💸 /sales - Sales dashboard from stored Xendit payments\n"
     msg += "💸 /sales today - Today's sales\n"
     msg += "💸 /sales month hybrid - Filter sales by course keyword\n"
@@ -407,6 +409,13 @@ def send_status():
     msg += f"\n📅 Next Reports: 7AM & 7PM daily"
 
     send_message(msg)
+
+
+def send_health():
+    """Send integration health summary."""
+    from health_monitor import build_health_report, format_health_report
+
+    send_message(format_health_report(build_health_report()))
 
 
 def send_keywords_list():
@@ -944,6 +953,11 @@ def process_message(text):
     if text_lower == "/status":
         send_status()
         return "status"
+
+    if text_lower == "/health":
+        send_message("⏳ Checking bot health... sandali lang Boss!")
+        send_health()
+        return "health"
 
     if tokens and tokens[0] in ["/sales", "/course_sales", "/coursesales"]:
         period, course_query = _parse_sales_command(text)
