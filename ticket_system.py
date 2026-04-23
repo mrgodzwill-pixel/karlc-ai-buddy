@@ -5,8 +5,10 @@ Tracks student issues (DMs, enrollment problems) with pending/done states.
 
 import os
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 
 from config import DATA_DIR, TICKET_RESOLVED_RETENTION_DAYS
+from course_mapping import canonical_course_name
 from storage import file_lock, load_json, save_json
 
 PHT = timezone(timedelta(hours=8))
@@ -45,12 +47,53 @@ def _ticket_timestamp(ticket, *fields):
     return None
 
 
+def _normalise_course_title(value=""):
+    canonical = canonical_course_name(value, allow_old_fallback=True)
+    return str(canonical or value or "").strip().lower()
+
+
+def _normalise_price_value(price=""):
+    raw = str(price or "").strip().lower()
+    if not raw:
+        return ""
+    cleaned = raw.replace("php", "").replace("₱", "").replace(",", "").strip()
+    try:
+        amount = float(cleaned)
+    except ValueError:
+        return raw
+    if amount.is_integer():
+        return f"{int(amount)}"
+    return f"{amount:.2f}".rstrip("0").rstrip(".")
+
+
+def _normalise_date_value(value=""):
+    raw = str(value or "").strip()
+    if not raw or raw.lower() == "unknown":
+        return ""
+
+    parsed = _ticket_timestamp({"value": raw}, "value")
+    if parsed is None:
+        try:
+            parsed = parsedate_to_datetime(raw)
+        except Exception:
+            parsed = None
+        if parsed is not None:
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=PHT)
+            parsed = parsed.astimezone(PHT)
+    if parsed is not None:
+        return parsed.date().isoformat()
+
+    lowered = raw.lower()
+    return lowered[:10] if len(lowered) >= 10 else lowered
+
+
 def _normalise_enrollment_key(student_email="", course_title="", price="", date_paid=""):
     return (
         str(student_email or "").strip().lower(),
-        str(course_title or "").strip().lower(),
-        str(price or "").strip().lower(),
-        str(date_paid or "").strip().lower(),
+        _normalise_course_title(course_title),
+        _normalise_price_value(price),
+        _normalise_date_value(date_paid),
     )
 
 
@@ -58,7 +101,7 @@ def _normalise_pending_ticket_key(ticket_type="", student_email="", course_title
     return (
         str(ticket_type or "").strip().lower(),
         str(student_email or "").strip().lower(),
-        str(course_title or "").strip().lower(),
+        _normalise_course_title(course_title),
     )
 
 

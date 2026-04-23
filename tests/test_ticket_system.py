@@ -80,6 +80,68 @@ class TicketSystemResolutionTests(unittest.TestCase):
                 self.assertEqual(active, [])
                 self.assertEqual(len(suppressed), 1)
 
+    def test_resolved_enrollment_suppression_normalizes_price_and_date_formats(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tickets_file = f"{tmpdir}/tickets.json"
+            overrides_file = f"{tmpdir}/resolved_enrollment_overrides.json"
+
+            with patch.object(ticket_system, "TICKETS_FILE", tickets_file), patch.object(
+                ticket_system, "ENROLLMENT_RESOLUTIONS_FILE", overrides_file
+            ):
+                ticket = ticket_system.create_enrollment_ticket(
+                    student_name="Ricky Andeo",
+                    student_email="rickyandeo90@gmail.com",
+                    course_title="10G Core Part 3: Centralized Pisowifi Setup",
+                    price="PHP 1,500",
+                    date_paid="2026-04-23T15:55:12+08:00",
+                )
+                ticket_system.resolve_ticket(ticket["id"])
+
+                active, suppressed = ticket_system.filter_resolved_enrollment_students(
+                    [
+                        {
+                            "email": "rickyandeo90@gmail.com",
+                            "course": "10G Core Part 3: Centralized Pisowifi Setup",
+                            "amount": "1500",
+                            "date": "Wed, 23 Apr 2026 15:55:55 +0800",
+                        }
+                    ]
+                )
+
+                self.assertEqual(active, [])
+                self.assertEqual(len(suppressed), 1)
+
+    def test_resolved_enrollment_suppression_normalizes_course_aliases(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tickets_file = f"{tmpdir}/tickets.json"
+            overrides_file = f"{tmpdir}/resolved_enrollment_overrides.json"
+
+            with patch.object(ticket_system, "TICKETS_FILE", tickets_file), patch.object(
+                ticket_system, "ENROLLMENT_RESOLUTIONS_FILE", overrides_file
+            ):
+                ticket = ticket_system.create_enrollment_ticket(
+                    student_name="Student One",
+                    student_email="student@example.com",
+                    course_title="MikroTik Basic (QuickStart)",
+                    price="PHP 799",
+                    date_paid="2026-04-18",
+                )
+                ticket_system.resolve_ticket(ticket["id"])
+
+                active, suppressed = ticket_system.filter_resolved_enrollment_students(
+                    [
+                        {
+                            "email": "student@example.com",
+                            "course": "MikroTik QuickStart: Configure From Scratch",
+                            "amount": "799",
+                            "date_paid": "2026-04-18T10:00:00+08:00",
+                        }
+                    ]
+                )
+
+                self.assertEqual(active, [])
+                self.assertEqual(len(suppressed), 1)
+
     def test_record_followup_attempt_persists_history(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tickets_file = f"{tmpdir}/tickets.json"
