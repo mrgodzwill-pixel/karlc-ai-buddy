@@ -86,6 +86,20 @@ def _course_keys_by_amount():
         if not course_key:
             continue
         mapping.setdefault(price_value, set()).add(course_key)
+
+    # Historical / live prices that are still seen in Xendit, even if the
+    # current config catalog has moved on. These aliases are only used for
+    # enrollment comparison rescue, not for public price display.
+    legacy_amounts = {
+        1500.0: {"10G Core Part 3: Centralized Pisowifi Setup"},
+        3500.0: {"New Dual ISP Load Balancing with Auto Fail-over (CPU Friendly)"},
+        3997.0: {"Complete MikroTik Mastery Bundle"},
+    }
+    for price_value, course_names in legacy_amounts.items():
+        for course_name in course_names:
+            course_key = _normalise_course_key(course_name)
+            if course_key:
+                mapping.setdefault(price_value, set()).add(course_key)
     return mapping
 
 
@@ -232,14 +246,23 @@ def _normalise_course_key(course_name):
 
 
 _COURSE_KEYS_BY_AMOUNT = _course_keys_by_amount()
+_COURSE_PRICE_BY_KEY = {
+    course_key: price_value
+    for price_value, course_keys in _COURSE_KEYS_BY_AMOUNT.items()
+    for course_key in course_keys
+}
 
 
-def _infer_enrolled_course_key_from_amount(amount, enrolled_course_keys):
+def _infer_enrolled_course_key_from_amount(amount, enrolled_course_keys, tolerance=2.0):
     amount_value = _amount_to_number(amount)
     if amount_value is None:
         return ""
 
-    candidates = set(_COURSE_KEYS_BY_AMOUNT.get(amount_value, set()))
+    candidates = {
+        course_key
+        for course_key, price_value in _COURSE_PRICE_BY_KEY.items()
+        if abs(price_value - amount_value) <= tolerance
+    }
     if enrolled_course_keys:
         candidates &= set(enrolled_course_keys)
     if len(candidates) == 1:
@@ -359,19 +382,33 @@ def _payment_is_enrolled(payment, enrolled_by_email, generic_emails):
     enrolled_course_keys = enrolled_by_email.get(email, set())
     raw_course = str(payment.get("course_raw") or payment.get("course", "")).strip()
     strict_canonical_course = canonical_course_name(raw_course, allow_old_fallback=False)
+    amount_value = _amount_to_number(payment.get("amount", ""))
 
     # If Xendit's saved course text is weak/generic but the paid amount maps
     # uniquely to one of the student's enrolled courses, treat it as matched.
     inferred_course_key = ""
-    if enrolled_course_keys and not strict_canonical_course:
+    if enrolled_course_keys:
         inferred_course_key = _infer_enrolled_course_key_from_amount(
             payment.get("amount", ""),
             enrolled_course_keys,
         )
-        if inferred_course_key:
+        if inferred_course_key and not strict_canonical_course:
             return True
 
     if payment_course_key:
+        if payment_course_key in enrolled_course_keys:
+            return True
+
+        expected_price = _COURSE_PRICE_BY_KEY.get(payment_course_key)
+        if (
+            inferred_course_key
+            and inferred_course_key in enrolled_course_keys
+            and payment_course_key != inferred_course_key
+            and amount_value is not None
+            and expected_price is not None
+            and abs(expected_price - amount_value) > 2.0
+        ):
+            return True
         return payment_course_key in enrolled_course_keys
     return bool(enrolled_course_keys) or email in generic_emails
 
