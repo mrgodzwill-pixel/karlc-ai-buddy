@@ -135,7 +135,7 @@ class SystemeSheetImportTests(unittest.TestCase):
                 "MikroTik QuickStart: Configure From Scratch",
             ],
         )
-        self.assertEqual(snapshot["tags"], ["OLD_BUNDLE", "QUICKSTART_PAID"])
+        self.assertEqual(snapshot["tags"], ["BUNDLE_PAID", "QUICKSTART_PAID"])
 
 
 if __name__ == "__main__":

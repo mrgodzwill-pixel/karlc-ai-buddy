@@ -187,7 +187,9 @@ def _tag_course_mapping():
     add(SYSTEME_TAG_BUNDLE4, "Complete MikroTik Mastery Bundle", kind="course_bundle")
 
     mapping["bundlepaid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
+    mapping["bundle_paid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
     mapping["xenditbundlepaid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
+    mapping["xendit_bundle_paid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
     mapping["3-in-1paid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
     mapping["3in1paid"] = {"name": "OLD Bundle Access", "kind": "course_bundle"}
     mapping["basicpaid"] = {"name": "MikroTik QuickStart: Configure From Scratch", "kind": "course"}

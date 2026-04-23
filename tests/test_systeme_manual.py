@@ -106,7 +106,7 @@ class SystemeManualTests(unittest.TestCase):
 
     def test_enroll_student_uses_old_bundle_fallback_tag_for_unknown_legacy_course(self):
         contact = {"id": 501, "email": "juan@example.com"}
-        tag = {"id": 88, "name": "OLD_BUNDLE"}
+        tag = {"id": 88, "name": "BUNDLE_PAID"}
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store_file = os.path.join(tmpdir, "systeme_students.json")
@@ -126,7 +126,7 @@ class SystemeManualTests(unittest.TestCase):
                 )
 
         assign_tag.assert_called_once_with("501", "88")
-        self.assertEqual(result["tag"]["name"], "OLD_BUNDLE")
+        self.assertEqual(result["tag"]["name"], "BUNDLE_PAID")
 
     def test_enroll_student_maps_invoice_style_old_title_to_quickstart_tag(self):
         contact = {"id": 501, "email": "ericjamison21@gmail.com"}
