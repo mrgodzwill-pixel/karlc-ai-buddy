@@ -272,6 +272,60 @@ def _infer_enrolled_course_key_from_amount(amount, enrolled_course_keys, toleran
     return ""
 
 
+def _canonical_course_name_from_key(course_key):
+    if not course_key:
+        return ""
+    return canonical_course_name(course_key, allow_old_fallback=True) or str(course_key or "").strip()
+
+
+def _reconcile_payment_course(payment, enrolled_course_keys):
+    """Correct an obviously wrong Xendit course label before matching/reporting."""
+    reconciled = dict(payment or {})
+    if not enrolled_course_keys:
+        return reconciled
+
+    inferred_course_key = _infer_enrolled_course_key_from_amount(
+        reconciled.get("amount", ""),
+        enrolled_course_keys,
+    )
+    if not inferred_course_key:
+        return reconciled
+
+    current_course_key = _normalise_course_key(reconciled.get("course", ""))
+    if current_course_key == inferred_course_key:
+        return reconciled
+
+    raw_course = str(reconciled.get("course_raw") or reconciled.get("course", "")).strip()
+    strict_canonical_course = canonical_course_name(raw_course, allow_old_fallback=False)
+    amount_value = _amount_to_number(reconciled.get("amount", ""))
+    expected_price = _COURSE_PRICE_BY_KEY.get(current_course_key)
+
+    should_override = False
+    if not current_course_key:
+        should_override = True
+    elif not strict_canonical_course:
+        should_override = True
+    elif (
+        inferred_course_key in enrolled_course_keys
+        and amount_value is not None
+        and expected_price is not None
+        and abs(expected_price - amount_value) > 2.0
+    ):
+        should_override = True
+
+    if not should_override:
+        return reconciled
+
+    inferred_course_name = _canonical_course_name_from_key(inferred_course_key)
+    if not inferred_course_name:
+        return reconciled
+
+    reconciled["course_original"] = str(reconciled.get("course") or "").strip()
+    reconciled["course"] = inferred_course_name
+    reconciled["course_corrected_by_amount"] = True
+    return reconciled
+
+
 def _store_known_systeme_courses():
     """Return known Systeme student emails mapped to enrolled course keys."""
     courses_by_email = {}
@@ -584,7 +638,11 @@ def compare_payments_vs_enrolments(days_back=7):
             comparable_payments.append(p)
 
     for p in comparable_payments:
-        (matched if _payment_is_enrolled(p, enrolled_by_email, generic_emails) else unmatched).append(p)
+        payment = _reconcile_payment_course(
+            p,
+            enrolled_by_email.get(str(p.get("email") or "").strip().lower(), set()),
+        )
+        (matched if _payment_is_enrolled(payment, enrolled_by_email, generic_emails) else unmatched).append(payment)
 
     if unmatched:
         confirmed_unmatched = _confirm_systeme_contact_payments(unmatched)

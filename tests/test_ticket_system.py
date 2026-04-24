@@ -299,6 +299,39 @@ class TicketSystemResolutionTests(unittest.TestCase):
                 self.assertEqual(refreshed["status"], "done")
                 self.assertIsNotNone(refreshed["resolved_at"])
 
+    def test_resolve_matching_enrollment_tickets_can_fix_wrong_course_ticket_by_amount(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tickets_file = f"{tmpdir}/tickets.json"
+            overrides_file = f"{tmpdir}/resolved_enrollment_overrides.json"
+
+            with patch.object(ticket_system, "TICKETS_FILE", tickets_file), patch.object(
+                ticket_system, "ENROLLMENT_RESOLUTIONS_FILE", overrides_file
+            ):
+                ticket = ticket_system.create_enrollment_ticket(
+                    student_name="Perlita Velasco",
+                    student_email="pervelasco77@gmail.com",
+                    course_title="MikroTik QuickStart: Configure From Scratch",
+                    price="PHP 977",
+                    date_paid="2026-04-24T07:10:00+08:00",
+                )
+
+                resolved = ticket_system.resolve_matching_enrollment_tickets(
+                    [
+                        {
+                            "email": "pervelasco77@gmail.com",
+                            "course": "10G Core Part 2: OSPF & Advanced Routing",
+                            "amount": "977",
+                            "date": "2026-04-24T07:10:30+08:00",
+                            "course_corrected_by_amount": True,
+                        }
+                    ]
+                )
+
+                refreshed = ticket_system.get_ticket(ticket["id"])
+                self.assertEqual(len(resolved), 1)
+                self.assertEqual(refreshed["status"], "done")
+                self.assertIsNotNone(refreshed["resolved_at"])
+
     def test_prune_resolved_tickets_removes_only_old_done_tickets(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tickets_file = f"{tmpdir}/tickets.json"

@@ -139,6 +139,28 @@ def _ticket_to_pending_key(ticket):
     )
 
 
+def _ticket_matches_student_by_email_amount_date(ticket, student):
+    if str(ticket.get("type") or "").strip().lower() != "enrollment_incomplete":
+        return False
+
+    ticket_email = str(ticket.get("student_email") or "").strip().lower()
+    student_email = str(student.get("email") or student.get("student_email") or "").strip().lower()
+    if not ticket_email or ticket_email != student_email:
+        return False
+
+    ticket_price = _normalise_price_value(ticket.get("price", ""))
+    student_price = _normalise_price_value(student.get("amount", student.get("price", "")))
+    if not ticket_price or ticket_price != student_price:
+        return False
+
+    ticket_date = _normalise_date_value(ticket.get("date_paid", ""))
+    student_date = _normalise_date_value(student.get("date_paid", student.get("date", "")))
+    if ticket_date and student_date:
+        return ticket_date == student_date
+
+    return bool(ticket_price)
+
+
 def _mask_phone_number(phone_number):
     phone = str(phone_number or "").strip()
     if len(phone) <= 4:
@@ -494,7 +516,12 @@ def resolve_matching_enrollment_tickets(students):
         for student in students or []
         if _student_to_pending_ticket_key(student)
     }
-    if not match_keys:
+    corrected_students = [
+        student
+        for student in students or []
+        if student.get("course_corrected_by_amount")
+    ]
+    if not match_keys and not corrected_students:
         return []
 
     resolved = []
@@ -505,7 +532,12 @@ def resolve_matching_enrollment_tickets(students):
                 continue
             if ticket.get("status") != "pending":
                 continue
-            if _ticket_to_pending_key(ticket) not in match_keys:
+            exact_match = _ticket_to_pending_key(ticket) in match_keys
+            corrected_match = any(
+                _ticket_matches_student_by_email_amount_date(ticket, student)
+                for student in corrected_students
+            )
+            if not exact_match and not corrected_match:
                 continue
 
             ticket["status"] = "done"

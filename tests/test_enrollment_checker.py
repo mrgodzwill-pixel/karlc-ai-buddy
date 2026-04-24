@@ -480,6 +480,58 @@ class EnrollmentCheckerTests(unittest.TestCase):
         self.assertEqual(report["matched"], 1)
         self.assertEqual(report["unmatched"], 0)
 
+    def test_compare_payments_corrects_wrong_explicit_course_when_amount_points_to_enrolled_course(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payments_file = os.path.join(tmpdir, "xendit_payments.json")
+            with patch.object(enrollment_checker, "DATA_DIR", tmpdir):
+                with patch.object(xendit_payments, "XENDIT_PAYMENTS_FILE", payments_file):
+                    xendit_payments.upsert_payment_records([
+                        {
+                            "status": "paid",
+                            "email": "pervelasco77@gmail.com",
+                            "course": "MikroTik QuickStart: Configure From Scratch",
+                            "amount": "PHP 977",
+                            "source": "xendit_payment_webhook",
+                            "xendit_payment_id": "py-ospf-velasco",
+                            "date": "2026-04-24T07:10:00Z",
+                            "paid_at": "2026-04-24T07:10:00Z",
+                        }
+                    ])
+                    with patch("enrollment_checker.xendit_api.available", return_value=False), patch(
+                        "enrollment_checker.gmail_imap.available", return_value=True
+                    ), patch(
+                        "enrollment_checker.list_recent_systeme_enrolments",
+                        return_value=[],
+                    ), patch(
+                        "enrollment_checker._search_enrolment_messages",
+                        return_value=[],
+                    ), patch(
+                        "enrollment_checker.load_student_store",
+                        return_value={
+                            "checked_at": "2026-04-24T15:00:00+08:00",
+                            "students": [
+                                {
+                                    "email": "pervelasco77@gmail.com",
+                                    "courses": [
+                                        {
+                                            "name": "10G Core Part 2: OSPF & Advanced Routing",
+                                            "status": "enrolled",
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    ):
+                        report = enrollment_checker.compare_payments_vs_enrolments(days_back=7)
+
+        self.assertEqual(report["matched"], 1)
+        self.assertEqual(report["unmatched"], 0)
+        self.assertEqual(
+            report["matched_students"][0]["course"],
+            "10G Core Part 2: OSPF & Advanced Routing",
+        )
+        self.assertTrue(report["matched_students"][0]["course_corrected_by_amount"])
+
     def test_compare_payments_does_not_override_explicit_course_when_its_price_matches_amount(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             payments_file = os.path.join(tmpdir, "xendit_payments.json")
