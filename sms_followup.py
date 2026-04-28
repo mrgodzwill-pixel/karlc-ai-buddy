@@ -40,16 +40,36 @@ def normalize_ph_phone_number(phone_number):
 def build_followup_message(ticket, contact_name):
     """Build a concise Taglish follow-up message based on ticket type."""
     first_name = (str(contact_name or "").strip().split() or ["Boss"])[0]
+    support_email = SUPPORT_EMAIL or "course@karlcomboy.com"
+    ticket_type = str(ticket.get("type") or "").strip().lower()
 
-    if ticket.get("type") == "enrollment_incomplete":
+    if ticket_type == "enrollment_incomplete":
         return (
             f"Hi {first_name}, Karl C here. Invalid ang enrollment email mo. "
-            f"Email {SUPPORT_EMAIL} with your correct email para ma-activate ang access mo. Thanks!"
+            f"Email {support_email} with your correct email para ma-activate ang access mo. Thanks!"
+        )
+
+    if ticket_type == "dm_verified":
+        return (
+            f"Hi {first_name}, Karl C here. Verified ang payment mo. "
+            f"Email {support_email} with your full name and correct email para ma-check ang access. Thanks!"
+        )
+
+    if ticket_type == "dm_no_payment":
+        return (
+            f"Hi {first_name}, Karl C here. Wala pa kaming matching payment record. "
+            f"Email {support_email} with your full name, mobile number, and payment details. Thanks!"
+        )
+
+    if ticket_type == "support_email":
+        return (
+            f"Hi {first_name}, Karl C here. Received ang concern mo. "
+            f"Email {support_email} with your correct email and complete details so we can assist you. Thanks!"
         )
 
     return (
         f"Hi {first_name}, Karl C here. "
-        f"Email {SUPPORT_EMAIL} with your correct email and details. Thanks!"
+        f"Email {support_email} with your correct email and details. Thanks!"
     )
 
 

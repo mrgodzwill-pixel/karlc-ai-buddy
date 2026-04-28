@@ -39,6 +39,46 @@ class SMSFollowupTests(unittest.TestCase):
         self.assertIn("course@karlcomboy.com", message)
         self.assertIn("correct email", message)
 
+    def test_build_followup_message_for_verified_payment_ticket(self):
+        message = sms_followup.build_followup_message(
+            {
+                "type": "dm_verified",
+                "course_title": "MikroTik Hybrid",
+            },
+            "Bernard Cruz",
+        )
+
+        self.assertIn("Bernard", message)
+        self.assertIn("Verified ang payment mo", message)
+        self.assertIn("course@karlcomboy.com", message)
+        self.assertNotIn("http", message.lower())
+
+    def test_build_followup_message_for_no_payment_ticket(self):
+        message = sms_followup.build_followup_message(
+            {
+                "type": "dm_no_payment",
+            },
+            "Bernard Cruz",
+        )
+
+        self.assertIn("Bernard", message)
+        self.assertIn("matching payment record", message)
+        self.assertIn("course@karlcomboy.com", message)
+        self.assertNotIn("http", message.lower())
+
+    def test_build_followup_message_for_support_email_ticket(self):
+        message = sms_followup.build_followup_message(
+            {
+                "type": "support_email",
+            },
+            "Bernard Cruz",
+        )
+
+        self.assertIn("Bernard", message)
+        self.assertIn("Received ang concern mo", message)
+        self.assertIn("course@karlcomboy.com", message)
+        self.assertNotIn("http", message.lower())
+
     def test_send_followup_sms_posts_to_semaphore(self):
         fake_response = Mock()
         fake_response.status_code = 200
